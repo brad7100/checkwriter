@@ -168,7 +168,7 @@ const createNewCheck = () => {
     </div>
 
 
-    <!-- Main App -->
+    <!-- Main App (when authenticated) -->
     <div v-else-if="!store.isLoading && isAuthenticated">
       <div class="container">
           <div style="padding-bottom: 20px; padding-top: 20px; text-align: center;">
@@ -210,6 +210,11 @@ const createNewCheck = () => {
       <div class="container">
         <RouterView :key="checkWriterKey" />
       </div>
+    </div>
+
+    <!-- Router View for Auth (when not authenticated) -->
+    <div v-else>
+      <RouterView />
     </div>
 </template>
 
