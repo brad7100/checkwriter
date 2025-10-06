@@ -425,7 +425,7 @@ async function printCheck () {
         tempDiv.style.left = '-9999px'
         tempDiv.style.top = '-9999px'
         tempDiv.style.width = '1200px'
-        tempDiv.style.height = '1553px'
+        tempDiv.style.height = '1480px'
         tempDiv.style.border = '1px solid #e6e6e6'
         tempDiv.style.backgroundColor = 'white'
         tempDiv.style.margin = '0 auto'
@@ -913,7 +913,7 @@ label {
 
 .check-box {
     width: 1200px;
-    height: 1553px;
+    height: 1480px;
     max-width: 100%;
     border: 1px solid #e6e6e6;
     background-color: white;
