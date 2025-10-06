@@ -45,6 +45,7 @@ onMounted(async () => {
     console.log('Auth state change:', event, session?.user?.email)
     isAuthenticated.value = !!session?.user
     userEmail.value = session?.user?.email || ''
+    console.log('isAuthenticated set to:', isAuthenticated.value)
   })
   const urlParams = new URLSearchParams(window.location.search)
   const qbConnected = urlParams.get('qb_connected')
@@ -155,12 +156,13 @@ const createNewCheck = () => {
     </div>
 
     <!-- Authentication Required -->
-    <div v-else-if="!store.isLoading && !isAuthenticated">
+    <div v-else-if="!isAuthenticated">
       <div class="auth-redirect">
         <div class="auth-redirect-content">
           <img src="/mycheckprinter.png" alt="My Check Printer" style="max-width: 200px; height: auto; margin-bottom: 20px;" />
           <h3>Authentication Required</h3>
           <p>Please sign in to access CheckWriter</p>
+          <p style="font-size: 12px; color: #666;">Debug: isAuthenticated = {{ isAuthenticated }}, isLoading = {{ store.isLoading }}</p>
           <button class="btn btn-primary btn-lg" @click="router.push('/auth')">
             <i class="bi bi-box-arrow-in-right"></i> Sign In
           </button>
