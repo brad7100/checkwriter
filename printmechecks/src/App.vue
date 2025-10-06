@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RouterLink, RouterView, useRouter } from 'vue-router'
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { useAppStore } from './stores/app'
 import { migrateLocalStorageToSupabase } from './utils/migrateToSupabase'
 
@@ -10,8 +10,24 @@ const showMigrationPrompt = ref(false)
 const isMigrating = ref(false)
 const checkWriterKey = ref(0)
 
+// Authentication computed properties
+const isAuthenticated = computed(() => !!store.authState.user)
+const userEmail = computed(() => store.authState.user?.email || '')
+
+// Authentication methods
+const handleSignOut = async () => {
+  const { error } = await store.signOut()
+  if (!error) {
+    router.push('/auth')
+  } else {
+    alert('Error signing out: ' + error.message)
+  }
+}
+
 // Check for QuickBooks OAuth callback
 onMounted(async () => {
+  // Initialize authentication
+  store.initializeAuth()
   const urlParams = new URLSearchParams(window.location.search)
   const qbConnected = urlParams.get('qb_connected')
   const companyId = urlParams.get('company_id')
@@ -120,18 +136,39 @@ const createNewCheck = () => {
       </div>
     </div>
 
+    <!-- Authentication Required -->
+    <div v-else-if="!store.isLoading && !isAuthenticated">
+      <div class="auth-redirect">
+        <div class="auth-redirect-content">
+          <img src="/mycheckprinter.png" alt="My Check Printer" style="max-width: 200px; height: auto; margin-bottom: 20px;" />
+          <h3>Authentication Required</h3>
+          <p>Please sign in to access CheckWriter</p>
+          <button class="btn btn-primary btn-lg" @click="router.push('/auth')">
+            <i class="bi bi-box-arrow-in-right"></i> Sign In
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Main App -->
-    <div v-else-if="!store.isLoading">
+    <div v-else-if="!store.isLoading && isAuthenticated">
       <div class="container">
           <div style="padding-bottom: 20px; padding-top: 20px; text-align: center;">
               <img src="/mycheckprinter.png" alt="My Check Printer" style="max-width: 300px; height: auto;" />
           </div>
           
           <div class="d-flex justify-content-between align-items-center mb-3">
-              <div></div> <!-- Empty div for spacing -->
-              <button class="btn btn-success" @click="createNewCheck">
-                  <i class="bi bi-plus-circle"></i> New Check
-              </button>
+              <div class="user-info">
+                  <span class="text-muted">Welcome, {{ userEmail }}</span>
+              </div>
+              <div class="d-flex gap-2">
+                  <button class="btn btn-success" @click="createNewCheck">
+                      <i class="bi bi-plus-circle"></i> New Check
+                  </button>
+                  <button class="btn btn-outline-secondary" @click="handleSignOut">
+                      <i class="bi bi-box-arrow-right"></i> Sign Out
+                  </button>
+              </div>
           </div>
           
           <ul class="nav nav-tabs">
@@ -248,6 +285,37 @@ nav a {
 
 nav a:first-of-type {
   border: 0;
+}
+
+.auth-redirect {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.auth-redirect-content {
+  background: white;
+  padding: 40px;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+  text-align: center;
+  max-width: 400px;
+}
+
+.auth-redirect-content h3 {
+  color: #2d3748;
+  margin-bottom: 10px;
+}
+
+.auth-redirect-content p {
+  color: #718096;
+  margin-bottom: 30px;
+}
+
+.user-info {
+  font-size: 14px;
 }
 
 </style>

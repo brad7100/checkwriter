@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { supabase } from '../lib/supabase'
+import { authService, type AuthUser, type AuthState } from '../lib/auth'
 
 // Interfaces
 export interface Company {
@@ -118,6 +119,14 @@ export const useAppStore = defineStore('useAppStore', () => {
   ])
   const isLoading = ref(true)
   const isLoaded = ref(false)
+  
+  // Authentication state
+  const authState = ref<AuthState>({
+    user: null,
+    session: null,
+    loading: true,
+    error: null
+  })
 
   // Computed
   const selectedCompany = computed(() => 
@@ -727,6 +736,32 @@ export const useAppStore = defineStore('useAppStore', () => {
   // Initialize
   loadData()
 
+  // Authentication methods
+  const initializeAuth = () => {
+    authService.subscribe((state) => {
+      authState.value = state
+    })
+  }
+
+  const signOut = async () => {
+    const { error } = await authService.signOut()
+    if (!error) {
+      // Clear all data when signing out
+      companies.value = []
+      bankAccounts.value = []
+      customLayouts.value = [{
+        id: 'original',
+        name: 'Original',
+        fields: [],
+        drawingElements: []
+      }]
+      selectedCompanyId.value = ''
+      selectedAccountId.value = ''
+      isLoaded.value = false
+    }
+    return { error }
+  }
+
   return {
     check,
     companies,
@@ -736,6 +771,7 @@ export const useAppStore = defineStore('useAppStore', () => {
     customLayouts,
     isLoading,
     isLoaded,
+    authState,
     selectedCompany,
     selectedAccount,
     accountsForSelectedCompany,
@@ -757,6 +793,8 @@ export const useAppStore = defineStore('useAppStore', () => {
     disconnectQuickBooks,
     syncCheckToQuickBooks,
     getQBAccounts,
-    getQBVendors
+    getQBVendors,
+    initializeAuth,
+    signOut
   }
 })
