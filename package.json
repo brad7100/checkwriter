@@ -1,0 +1,28 @@
+{
+  "name": "checkwriter",
+  "version": "1.0.0",
+  "description": "Professional check printing application with custom layouts",
+  "scripts": {
+    "build": "cd printmechecks && npm run build",
+    "start": "cd printmechecks && npm run preview",
+    "dev": "cd printmechecks && npm run dev",
+    "install-deps": "cd printmechecks && npm install"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brad7100/checkwriter.git"
+  },
+  "keywords": [
+    "check",
+    "printing",
+    "vue",
+    "typescript",
+    "supabase"
+  ],
+  "author": "Brad Williams",
+  "license": "MIT"
+}
