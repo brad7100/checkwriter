@@ -16,11 +16,14 @@ COPY printmechecks/ .
 # Build the application
 RUN npm run build
 
+# Install serve for production
+RUN npm install -g serve
+
 # Remove dev dependencies to reduce image size
 RUN npm prune --production
 
 # Expose port
 EXPOSE 3000
 
-# Start the application
-CMD ["sh", "-c", "npm run preview -- --host 0.0.0.0 --port ${PORT:-3000}"]
+# Start the application using serve
+CMD ["sh", "-c", "serve -s dist -l ${PORT:-3000}"]
