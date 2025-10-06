@@ -38,8 +38,10 @@ onMounted(async () => {
     console.log('User authenticated:', session.user.email)
   } else {
     console.log('No user session found')
+    console.log('Current route:', router.currentRoute.value.path)
     // Redirect to login if not authenticated and not already on auth page
     if (router.currentRoute.value.path !== '/auth') {
+      console.log('Redirecting to /auth')
       router.push('/auth')
     }
   }
@@ -53,6 +55,7 @@ onMounted(async () => {
     
     // Auto-redirect to login if not authenticated
     if (!isAuthenticated.value && router.currentRoute.value.path !== '/auth') {
+      console.log('Auth state change - redirecting to /auth')
       router.push('/auth')
     }
   })
