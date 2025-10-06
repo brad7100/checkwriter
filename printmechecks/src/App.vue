@@ -38,6 +38,10 @@ onMounted(async () => {
     console.log('User authenticated:', session.user.email)
   } else {
     console.log('No user session found')
+    // Redirect to login if not authenticated and not already on auth page
+    if (router.currentRoute.value.path !== '/auth') {
+      router.push('/auth')
+    }
   }
   
   // Listen for auth changes
@@ -46,6 +50,11 @@ onMounted(async () => {
     isAuthenticated.value = !!session?.user
     userEmail.value = session?.user?.email || ''
     console.log('isAuthenticated set to:', isAuthenticated.value)
+    
+    // Auto-redirect to login if not authenticated
+    if (!isAuthenticated.value && router.currentRoute.value.path !== '/auth') {
+      router.push('/auth')
+    }
   })
   const urlParams = new URLSearchParams(window.location.search)
   const qbConnected = urlParams.get('qb_connected')
@@ -155,20 +164,6 @@ const createNewCheck = () => {
       </div>
     </div>
 
-    <!-- Authentication Required -->
-    <div v-else-if="!isAuthenticated">
-      <div class="auth-redirect">
-        <div class="auth-redirect-content">
-          <img src="/mycheckprinter.png" alt="My Check Printer" style="max-width: 200px; height: auto; margin-bottom: 20px;" />
-          <h3>Authentication Required</h3>
-          <p>Please sign in to access CheckWriter</p>
-          <p style="font-size: 12px; color: #666;">Debug: isAuthenticated = {{ isAuthenticated }}, isLoading = {{ store.isLoading }}</p>
-          <button class="btn btn-primary btn-lg" @click="router.push('/auth')">
-            <i class="bi bi-box-arrow-in-right"></i> Sign In
-          </button>
-        </div>
-      </div>
-    </div>
 
     <!-- Main App -->
     <div v-else-if="!store.isLoading && isAuthenticated">
@@ -305,33 +300,6 @@ nav a {
 
 nav a:first-of-type {
   border: 0;
-}
-
-.auth-redirect {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
-
-.auth-redirect-content {
-  background: white;
-  padding: 40px;
-  border-radius: 12px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-  text-align: center;
-  max-width: 400px;
-}
-
-.auth-redirect-content h3 {
-  color: #2d3748;
-  margin-bottom: 10px;
-}
-
-.auth-redirect-content p {
-  color: #718096;
-  margin-bottom: 30px;
 }
 
 .user-info {
