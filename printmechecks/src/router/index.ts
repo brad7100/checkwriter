@@ -12,10 +12,22 @@ const router = createRouter({
     {
       path: '/history',
       name: 'history',
-      // route level code-splitting
-      // this generates a separate chunk (About.[hash].js) for this route
-      // which is lazy-loaded when the route is visited.
       component: () => import('../views/HistoryView.vue')
+    },
+    {
+      path: '/manage',
+      name: 'manage',
+      component: () => import('../views/ManageView.vue')
+    },
+    {
+      path: '/layouts',
+      name: 'layouts',
+      component: () => import('../components/CheckLayoutCreator.vue')
+    },
+    {
+      path: '/layout-editor/:id',
+      name: 'layout-editor',
+      component: () => import('../views/LayoutEditorView.vue')
     }
   ]
 })
