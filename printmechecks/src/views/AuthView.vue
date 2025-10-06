@@ -1,6 +1,7 @@
 <template>
   <div class="login-page">
-    <h1>Login</h1>
+    <h1>Login Page</h1>
+    <p>This is the login page - if you can see this, the component is working!</p>
     
     <form @submit.prevent="handleLogin">
       <div>
@@ -41,6 +42,7 @@ const error = ref('')
 
 onMounted(() => {
   console.log('AuthView mounted - login page loaded')
+  console.log('Current route:', router.currentRoute.value.path)
 })
 
 const handleLogin = async () => {
