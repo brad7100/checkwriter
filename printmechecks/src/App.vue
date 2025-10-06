@@ -4,6 +4,7 @@ import { onMounted, ref, computed } from 'vue'
 import { useAppStore } from './stores/app'
 import { migrateLocalStorageToSupabase } from './utils/migrateToSupabase'
 import { authService } from './lib/auth'
+import { supabase } from './lib/supabase'
 
 const store = useAppStore()
 const router = useRouter()
@@ -11,26 +12,16 @@ const showMigrationPrompt = ref(false)
 const isMigrating = ref(false)
 const checkWriterKey = ref(0)
 
-// Authentication computed properties
-const isAuthenticated = computed(() => !!store.authState.user)
-const userEmail = computed(() => store.authState.user?.email || '')
+// Simple authentication check
+const isAuthenticated = ref(false)
+const userEmail = ref('')
 
 // Authentication methods
 const handleSignOut = async () => {
-  const { error } = await authService.signOut()
+  const { error } = await supabase.auth.signOut()
   if (!error) {
-    // Clear store data
-    store.companies = []
-    store.bankAccounts = []
-    store.customLayouts = [{
-      id: 'original',
-      name: 'Original',
-      fields: [],
-      drawingElements: []
-    }]
-    store.selectedCompanyId = ''
-    store.selectedAccountId = ''
-    store.isLoaded = false
+    isAuthenticated.value = false
+    userEmail.value = ''
     router.push('/auth')
   } else {
     alert('Error signing out: ' + error.message)
@@ -39,8 +30,23 @@ const handleSignOut = async () => {
 
 // Check for QuickBooks OAuth callback
 onMounted(async () => {
-  // Initialize authentication
-  store.initializeAuth()
+  // Check if user is logged in
+  const { data: { session } } = await supabase.auth.getSession()
+  if (session?.user) {
+    isAuthenticated.value = true
+    userEmail.value = session.user.email || ''
+  }
+  
+  // Listen for auth changes
+  supabase.auth.onAuthStateChange((event, session) => {
+    if (session?.user) {
+      isAuthenticated.value = true
+      userEmail.value = session.user.email || ''
+    } else {
+      isAuthenticated.value = false
+      userEmail.value = ''
+    }
+  })
   const urlParams = new URLSearchParams(window.location.search)
   const qbConnected = urlParams.get('qb_connected')
   const companyId = urlParams.get('company_id')
