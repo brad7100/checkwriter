@@ -18,14 +18,10 @@ const userEmail = ref('')
 
 // Authentication methods
 const handleSignOut = async () => {
-  const { error } = await supabase.auth.signOut()
-  if (!error) {
-    isAuthenticated.value = false
-    userEmail.value = ''
-    router.push('/auth')
-  } else {
-    alert('Error signing out: ' + error.message)
-  }
+  await supabase.auth.signOut()
+  isAuthenticated.value = false
+  userEmail.value = ''
+  router.push('/auth')
 }
 
 // Check for QuickBooks OAuth callback
@@ -39,13 +35,8 @@ onMounted(async () => {
   
   // Listen for auth changes
   supabase.auth.onAuthStateChange((event, session) => {
-    if (session?.user) {
-      isAuthenticated.value = true
-      userEmail.value = session.user.email || ''
-    } else {
-      isAuthenticated.value = false
-      userEmail.value = ''
-    }
+    isAuthenticated.value = !!session?.user
+    userEmail.value = session?.user?.email || ''
   })
   const urlParams = new URLSearchParams(window.location.search)
   const qbConnected = urlParams.get('qb_connected')
