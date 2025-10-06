@@ -3,6 +3,7 @@ import { RouterLink, RouterView, useRouter } from 'vue-router'
 import { onMounted, ref, computed } from 'vue'
 import { useAppStore } from './stores/app'
 import { migrateLocalStorageToSupabase } from './utils/migrateToSupabase'
+import { authService } from './lib/auth'
 
 const store = useAppStore()
 const router = useRouter()
@@ -16,8 +17,20 @@ const userEmail = computed(() => store.authState.user?.email || '')
 
 // Authentication methods
 const handleSignOut = async () => {
-  const { error } = await store.signOut()
+  const { error } = await authService.signOut()
   if (!error) {
+    // Clear store data
+    store.companies = []
+    store.bankAccounts = []
+    store.customLayouts = [{
+      id: 'original',
+      name: 'Original',
+      fields: [],
+      drawingElements: []
+    }]
+    store.selectedCompanyId = ''
+    store.selectedAccountId = ''
+    store.isLoaded = false
     router.push('/auth')
   } else {
     alert('Error signing out: ' + error.message)
