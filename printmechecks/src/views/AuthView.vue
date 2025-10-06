@@ -29,7 +29,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/lib/supabase'
 
@@ -39,7 +39,12 @@ const username = ref('')
 const password = ref('')
 const error = ref('')
 
+onMounted(() => {
+  console.log('AuthView mounted - login page loaded')
+})
+
 const handleLogin = async () => {
+  console.log('Login attempt:', username.value)
   error.value = ''
   
   try {
@@ -49,11 +54,14 @@ const handleLogin = async () => {
     })
     
     if (authError) {
+      console.log('Login error:', authError.message)
       error.value = authError.message
     } else {
+      console.log('Login success:', data.user)
       router.push('/')
     }
   } catch (err) {
+    console.log('Login exception:', err)
     error.value = 'Login failed'
   }
 }

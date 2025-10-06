@@ -26,15 +26,23 @@ const handleSignOut = async () => {
 
 // Check for QuickBooks OAuth callback
 onMounted(async () => {
+  console.log('App mounted - checking auth state')
+  
   // Check if user is logged in
   const { data: { session } } = await supabase.auth.getSession()
+  console.log('Initial session:', session)
+  
   if (session?.user) {
     isAuthenticated.value = true
     userEmail.value = session.user.email || ''
+    console.log('User authenticated:', session.user.email)
+  } else {
+    console.log('No user session found')
   }
   
   // Listen for auth changes
   supabase.auth.onAuthStateChange((event, session) => {
+    console.log('Auth state change:', event, session?.user?.email)
     isAuthenticated.value = !!session?.user
     userEmail.value = session?.user?.email || ''
   })
