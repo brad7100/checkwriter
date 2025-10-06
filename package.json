@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "description": "Professional check printing application with custom layouts",
   "scripts": {
-    "build": "cd printmechecks && npm run build",
-    "start": "cd printmechecks && npm run preview",
+    "build": "cd printmechecks && npm ci && npm run build",
+    "start": "cd printmechecks && npm run preview -- --host 0.0.0.0 --port $PORT",
     "dev": "cd printmechecks && npm run dev",
-    "install-deps": "cd printmechecks && npm install"
+    "install": "cd printmechecks && npm ci"
   },
   "engines": {
     "node": ">=18.0.0",

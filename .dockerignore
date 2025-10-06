@@ -1,0 +1,15 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+README.md
+.env
+.nyc_output
+coverage
+.vscode
+.DS_Store
+printmechecks/node_modules
+printmechecks/.vite
+printmechecks/dist
+printmechecks/coverage
+printmechecks/.nyc_output
