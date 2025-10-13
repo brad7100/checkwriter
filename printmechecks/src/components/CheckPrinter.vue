@@ -79,7 +79,7 @@
                 
                 
                 <!-- Fixed MICR Line (only show if account is selected and not preprinted) -->
-                <div v-if="state.selectedAccountId && !isPreprinted" class="banking" style="position: absolute; top: 428px; left: 147px">
+                <div v-if="state.selectedAccountId && !isPreprinted" class="banking" style="position: absolute; top: 420px; left: 147px">
                     <div class="routing" style="display: inline;">
                         a{{check.routingNumber}}a
                     </div>
@@ -649,7 +649,7 @@ async function printCheck () {
             }
             .banking {
               font-family: 'banking' !important;
-              font-size: 43px !important;
+              font-size: 37px !important;
             }
             .check-box-print {
               position: relative;
@@ -1165,7 +1165,7 @@ label {
 
 .banking {
     font-family: 'banking';
-    font-size: 43px;
+    font-size: 37px;
 }
 .dollar-line::after{
     content: "Dollars";
