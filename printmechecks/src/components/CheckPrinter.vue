@@ -79,7 +79,7 @@
                 
                 
                 <!-- Fixed MICR Line (only show if account is selected and not preprinted) -->
-                <div v-if="state.selectedAccountId && !isPreprinted" class="banking" style="position: absolute; top: 420px; left: 80px">
+                <div v-if="state.selectedAccountId && !isPreprinted" class="banking" style="position: absolute; top: 428px; left: 147px">
                     <div class="routing" style="display: inline;">
                         a{{check.routingNumber}}a
                     </div>
@@ -112,8 +112,8 @@
                             <button class="btn btn-sm btn-outline-primary mt-1" @click="createPreprintedTemplate">
                                 <i class="bi bi-plus-circle"></i> Create Preprinted Template
                             </button>
-                        </div>
-                    </div>
+                </div>
+                </div>
                 </div>
                 </div>
 
@@ -399,16 +399,24 @@ const toWords: (denom: number | string) => string = (denom) => {
 }
 
 async function printCheck () {
-    // Mark check as printed if it has an ID (already saved to history)
+    // Always save the check first (create or update)
     if (check.id) {
+        // Update existing check and mark as printed
         check.isPrinted = true
         check.printedDate = new Date().toISOString()
         
-        // Update in Supabase
         await state.updateCheck(check.id, {
+            ...check,
             isPrinted: true,
             printedDate: check.printedDate
         })
+    } else {
+        // Create new check and mark as printed
+        check.isPrinted = true
+        check.printedDate = new Date().toISOString()
+        
+        const savedCheck = await state.saveCheck({...check})
+        check.id = savedCheck.id
     }
     
     if (isPreprinted.value) {
@@ -476,7 +484,7 @@ async function printCheck () {
             body {
               transform: scale(1);
               transform-origin: top center;
-              width: 149%;
+              width: 145%;
               margin: 0;
               padding: 0;
             }
@@ -501,7 +509,7 @@ async function printCheck () {
             }
             .banking {
               font-family: 'banking' !important;
-              font-size: 37px !important;
+              font-size: 43px !important;
             }
             .check-box-print {
               position: relative;
@@ -527,7 +535,7 @@ async function printCheck () {
         body {
           transform: scale(1);
           transform-origin: top center;
-          width: 149%;
+          width: 145%;
           margin: 0;
           padding: 0;
         }
@@ -553,7 +561,7 @@ async function printCheck () {
             .banking {
               font-family: 'banking' !important;
               font-size: 37px !important;
-            }
+        }
         .check-box-print {
           position: relative;
         }
@@ -566,12 +574,17 @@ async function printCheck () {
 }
 
 async function saveToHistory () {
-    // Mark as unprinted
+    // Mark as unprinted (only when saving without printing)
     check.isPrinted = false
     check.printedDate = null
     
     // Save to Supabase
-    await state.saveCheck({...check}) // Clone to avoid reference issues
+    const savedCheck = await state.saveCheck({...check}) // Clone to avoid reference issues
+    
+    // Update the local check with the saved ID
+    if (!check.id) {
+        check.id = savedCheck.id
+    }
     
     alert('Check saved successfully!')
 }
@@ -861,6 +874,9 @@ label {
     font-size: 30px;
     max-width: 350px;
     line-height: 0.65;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .signature-data {
     font-family: Caveat;
@@ -959,7 +975,7 @@ label {
 
 .banking {
     font-family: 'banking';
-    font-size: 37px;
+    font-size: 43px;
 }
 .dollar-line::after{
     content: "Dollars";
