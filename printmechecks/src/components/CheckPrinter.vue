@@ -112,7 +112,21 @@
                             <button class="btn btn-sm btn-outline-primary mt-1" @click="createPreprintedTemplate">
                                 <i class="bi bi-plus-circle"></i> Create Preprinted Template
                             </button>
+                        </div>
+                    </div>
                 </div>
+
+                <!-- Stub Template Selection -->
+                <div class="row mt-3" v-if="state.selectedAccountId">
+                    <div class="col-12">
+                        <label class="form-label"><strong>Stub Template</strong></label>
+                        <select class="form-select" v-model="selectedStubTemplateId">
+                            <option value="default">Default Stub</option>
+                            <option v-for="template in stubTemplates" :key="template.id" :value="template.id">
+                                {{ template.name }}
+                            </option>
+                        </select>
+                        <small class="form-text text-muted">Choose a template for the check stubs (record-keeping sections)</small>
                 </div>
                 </div>
                 </div>
@@ -193,6 +207,14 @@ const isPreprinted = ref(false)
 
 // Template switching
 const selectedTemplateId = ref('original')
+const selectedStubTemplateId = ref('default')
+
+// Stub templates (templates with names containing "stub")
+const stubTemplates = computed(() => {
+  return state.customLayouts.filter(layout => 
+    layout.name.toLowerCase().includes('stub')
+  )
+})
 const currentTemplate = computed(() => {
   // If preprinted toggle is on, use the "preprinted" template
   if (isPreprinted.value) {
@@ -217,6 +239,14 @@ const currentTemplate = computed(() => {
     return null
   }
   return state.customLayouts.find(layout => layout.id === selectedTemplateId.value)
+})
+
+// Current stub template
+const currentStubTemplate = computed(() => {
+  if (selectedStubTemplateId.value === 'default') {
+    return null // Use default stub
+  }
+  return state.customLayouts.find(layout => layout.id === selectedStubTemplateId.value)
 })
 
 // (No fixed check number overlay; add as a field in layout editor)
@@ -380,6 +410,85 @@ const getDataValue = (dataBinding: string) => {
   }
 }
 
+// Create stub content using template or default
+const createStubContent = (stubType: 'payee' | 'bank') => {
+  if (currentStubTemplate.value) {
+    // Use custom stub template
+    const template = currentStubTemplate.value
+    let content = ''
+    
+    if (template.fields) {
+      template.fields.forEach(field => {
+        const fieldContent = getFieldContent(field)
+        const styleObj = getFieldStyle(field)
+        
+        // Convert style object to CSS string
+        const styleString = Object.entries(styleObj)
+          .map(([key, value]) => `${key.replace(/([A-Z])/g, '-$1').toLowerCase()}: ${value}`)
+          .join('; ')
+        
+        content += `<div style="position: absolute; ${styleString}">${fieldContent}</div>`
+      })
+    }
+    
+    if (template.drawingElements) {
+      template.drawingElements.forEach(element => {
+        const elementStyleObj = getElementStyle(element)
+        const styleString = Object.entries(elementStyleObj)
+          .map(([key, value]) => `${key.replace(/([A-Z])/g, '-$1').toLowerCase()}: ${value}`)
+          .join('; ')
+        
+        content += `<div style="position: absolute; ${styleString}"></div>`
+      })
+    }
+    
+    return content
+  } else {
+    // Use default stub content
+    const stubData = {
+      payee: {
+        title: 'Check Stub - Payee Copy',
+        fields: [
+          { label: 'Company:', value: state.selectedCompany?.name || 'N/A' },
+          { label: 'Account:', value: state.selectedAccount?.name || 'N/A' },
+          { label: 'Check #:', value: check.checkNumber },
+          { label: 'Date:', value: check.date },
+          { label: 'Pay to:', value: check.payTo },
+          { label: 'Amount:', value: '$' + formatMoney(check.amount) },
+          { label: 'Memo:', value: check.memo }
+        ]
+      },
+      bank: {
+        title: 'Check Stub - Bank Copy',
+        fields: [
+          { label: 'Company:', value: state.selectedCompany?.name || 'N/A' },
+          { label: 'Account:', value: state.selectedAccount?.name || 'N/A' },
+          { label: 'Check #:', value: check.checkNumber },
+          { label: 'Date:', value: check.date },
+          { label: 'Pay to:', value: check.payTo },
+          { label: 'Amount:', value: '$' + formatMoney(check.amount) },
+          { label: 'Memo:', value: check.memo },
+          { label: 'Routing:', value: check.routingNumber },
+          { label: 'Account #:', value: check.bankAccountNumber }
+        ]
+      }
+    }
+    
+    const data = stubData[stubType]
+    let content = `
+      <div class="stub-content">
+        <div class="stub-header">${data.title}</div>
+    `
+    
+    data.fields.forEach(field => {
+      content += `<div><strong>${field.label}</strong> ${field.value}</div>`
+    })
+    
+    content += '</div>'
+    return content
+  }
+}
+
 const toWordsTool = new ToWords({
   localeCode: 'en-US',
   converterOptions: {
@@ -432,8 +541,8 @@ async function printCheck () {
         tempDiv.style.position = 'absolute'
         tempDiv.style.left = '-9999px'
         tempDiv.style.top = '-9999px'
-        tempDiv.style.width = '1200px'
-        tempDiv.style.height = '1480px'
+        tempDiv.style.width = '612px'
+        tempDiv.style.height = '792px'
         tempDiv.style.border = '1px solid #e6e6e6'
         tempDiv.style.backgroundColor = 'white'
         tempDiv.style.margin = '0 auto'
@@ -471,8 +580,39 @@ async function printCheck () {
             })
         }
         
+        // Add stub sections - properly positioned for QuickBooks check paper
+        const stub1Div = document.createElement('div')
+        stub1Div.style.position = 'absolute'
+        stub1Div.style.top = '525px'
+        stub1Div.style.left = '150px'
+        stub1Div.style.transform = 'scale(1.5)'
+        stub1Div.style.transformOrigin = 'top left'
+        stub1Div.style.width = '612px'
+        stub1Div.style.height = '300px'
+        stub1Div.style.border = '1px solid #ccc'
+        stub1Div.style.backgroundColor = 'white'
+        stub1Div.style.padding = '20px'
+        stub1Div.style.boxSizing = 'border-box'
+        stub1Div.innerHTML = createStubContent('payee')
+        
+        const stub2Div = document.createElement('div')
+        stub2Div.style.position = 'absolute'
+        stub2Div.style.top = '1000px'
+        stub2Div.style.left = '150px'
+        stub2Div.style.transform = 'scale(1.5)'
+        stub2Div.style.transformOrigin = 'top left'
+        stub2Div.style.width = '612px'
+        stub2Div.style.height = '300px'
+        stub2Div.style.border = '1px solid #ccc'
+        stub2Div.style.backgroundColor = 'white'
+        stub2Div.style.padding = '20px'
+        stub2Div.style.boxSizing = 'border-box'
+        stub2Div.innerHTML = createStubContent('bank')
+        
         // Add to document temporarily
         document.body.appendChild(tempDiv)
+        document.body.appendChild(stub1Div)
+        document.body.appendChild(stub2Div)
         
         // Create print styles
         const style = document.createElement('style')
@@ -523,9 +663,42 @@ async function printCheck () {
         
         // Clean up
         document.body.removeChild(tempDiv)
+        document.body.removeChild(stub1Div)
+        document.body.removeChild(stub2Div)
         document.head.removeChild(style)
     } else {
-        // Regular print with MICR line
+        // Regular print with MICR line - add stub sections
+        const stub1Div = document.createElement('div')
+        stub1Div.style.position = 'absolute'
+        stub1Div.style.top = '525px'
+        stub1Div.style.left = '150px'
+        stub1Div.style.transform = 'scale(1.5)'
+        stub1Div.style.transformOrigin = 'top left'
+        stub1Div.style.width = '612px'
+        stub1Div.style.height = '300px'
+        stub1Div.style.border = '1px solid #ccc'
+        stub1Div.style.backgroundColor = 'white'
+        stub1Div.style.padding = '20px'
+        stub1Div.style.boxSizing = 'border-box'
+        stub1Div.innerHTML = createStubContent('payee')
+        
+        const stub2Div = document.createElement('div')
+        stub2Div.style.position = 'absolute'
+        stub2Div.style.top = '1000px'
+        stub2Div.style.left = '150px'
+        stub2Div.style.transform = 'scale(1.5)'
+        stub2Div.style.transformOrigin = 'top left'
+        stub2Div.style.width = '612px'
+        stub2Div.style.height = '300px'
+        stub2Div.style.border = '1px solid #ccc'
+        stub2Div.style.backgroundColor = 'white'
+        stub2Div.style.padding = '20px'
+        stub2Div.style.boxSizing = 'border-box'
+        stub2Div.innerHTML = createStubContent('bank')
+        
+        document.body.appendChild(stub1Div)
+        document.body.appendChild(stub2Div)
+        
     const style = document.createElement('style');
     style.textContent = `
       @media print {
@@ -570,6 +743,8 @@ async function printCheck () {
     document.head.appendChild(style);
         window.print(); // Opens native print preview dialog
     style.remove();
+    document.body.removeChild(stub1Div);
+    document.body.removeChild(stub2Div);
 }
 }
 
@@ -882,6 +1057,21 @@ label {
     font-family: Caveat;
     font-size: 40px;
     transform: rotate(-2deg);
+}
+
+/* Stub content styles */
+.stub-content {
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.stub-header {
+    font-weight: bold;
+    font-size: 14px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid #ccc;
+    padding-bottom: 5px;
 }
 .amount-line-data {
     text-transform: capitalize;
