@@ -91,16 +91,8 @@
       </form>
 
       <div class="auth-footer">
-        <p class="auth-switch">
-          Don't have an account?
-          <button
-            type="button"
-            class="auth-link"
-            @click="$emit('switch-to-signup')"
-            :disabled="loading"
-          >
-            Sign up
-          </button>
+        <p class="auth-switch text-muted small">
+          Only an admin can add new users. Contact your administrator for access.
         </p>
       </div>
     </div>
@@ -113,7 +105,6 @@ import { authService, type SignInData } from '@/lib/auth'
 
 // Emits
 const emit = defineEmits<{
-  'switch-to-signup': []
   'forgot-password': [email: string]
 }>()
 

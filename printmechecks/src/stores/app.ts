@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { supabase } from '../lib/supabase'
 import { authService, type AuthUser, type AuthState } from '../lib/auth'
@@ -128,20 +128,80 @@ export const useAppStore = defineStore('useAppStore', () => {
     error: null
   })
 
+  // Current user's profile (role, must_set_password) for permission checks
+  const userProfile = ref<{ id: string; email: string; role: 'admin' | 'user'; must_set_password?: boolean } | null>(null)
+
+  // Non-admin: list of bank account IDs this user can access (from account_users)
+  const allowedBankAccountIds = ref<string[]>([])
+
   // Computed
-  const selectedCompany = computed(() => 
+  const isAdmin = computed(() => userProfile.value?.role === 'admin')
+
+  // Only companies that have at least one account the user can access (or all if admin)
+  const visibleCompanies = computed(() => {
+    if (isAdmin.value) return companies.value
+    const allowed = new Set(allowedBankAccountIds.value)
+    return companies.value.filter(c =>
+      bankAccounts.value.some(a => a.companyId === c.id && allowed.has(a.id))
+    )
+  })
+
+  // Only bank accounts the user is assigned to (or all if admin)
+  const visibleBankAccounts = computed(() => {
+    if (isAdmin.value) return bankAccounts.value
+    const allowed = new Set(allowedBankAccountIds.value)
+    return bankAccounts.value.filter(a => allowed.has(a.id))
+  })
+
+  const selectedCompany = computed(() =>
     companies.value.find(c => c.id === selectedCompanyId.value)
   )
 
-  const selectedAccount = computed(() => 
+  const selectedAccount = computed(() =>
     bankAccounts.value.find(a => a.id === selectedAccountId.value)
   )
 
-  const accountsForSelectedCompany = computed(() => 
-    bankAccounts.value.filter(a => a.companyId === selectedCompanyId.value)
+  const accountsForSelectedCompany = computed(() =>
+    visibleBankAccounts.value.filter(a => a.companyId === selectedCompanyId.value)
   )
 
-  // Load data from Supabase exclusively
+  // Clear selection if current selection is not in visible list (e.g. after permission change)
+  watch([visibleCompanies, visibleBankAccounts], () => {
+    if (selectedCompanyId.value && !visibleCompanies.value.some(c => c.id === selectedCompanyId.value)) {
+      selectedCompanyId.value = ''
+      selectedAccountId.value = ''
+    }
+    if (selectedAccountId.value && !visibleBankAccounts.value.some(a => a.id === selectedAccountId.value)) {
+      selectedAccountId.value = ''
+    }
+  }, { immediate: true })
+
+  // Fetch current user's profile (role) from Supabase
+  const fetchUserProfile = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, email, role, must_set_password')
+        .eq('id', userId)
+        .single()
+      if (error) {
+        console.warn('Could not fetch profile (RLS or table missing):', error.message)
+        userProfile.value = null
+        return
+      }
+      userProfile.value = data ? {
+        id: data.id,
+        email: data.email,
+        role: data.role,
+        must_set_password: data.must_set_password ?? false
+      } : null
+    } catch (e) {
+      console.warn('fetchUserProfile error:', e)
+      userProfile.value = null
+    }
+  }
+
+  // Load data from Supabase exclusively (RLS filters by user/account access)
   const loadData = async () => {
     isLoading.value = true
     try {
@@ -733,13 +793,46 @@ export const useAppStore = defineStore('useAppStore', () => {
     return []
   }
 
+  async function clearMustSetPassword() {
+    const { error } = await supabase.rpc('clear_must_set_password')
+    if (!error && userProfile.value) {
+      userProfile.value = { ...userProfile.value, must_set_password: false }
+    }
+    return { error }
+  }
+
   // Initialize
   loadData()
 
+  // Load which bank account IDs the current user can access (for non-admins)
+  const fetchAllowedAccountIds = async (userId: string) => {
+    const { data, error } = await supabase
+      .from('account_users')
+      .select('bank_account_id')
+      .eq('user_id', userId)
+    if (error) {
+      allowedBankAccountIds.value = []
+      return
+    }
+    allowedBankAccountIds.value = (data ?? []).map((r: { bank_account_id: string }) => r.bank_account_id)
+  }
+
   // Authentication methods
   const initializeAuth = () => {
-    authService.subscribe((state) => {
+    authService.subscribe(async (state) => {
       authState.value = state
+      if (state.user?.id) {
+        await fetchUserProfile(state.user.id)
+        if (userProfile.value?.role !== 'admin') {
+          await fetchAllowedAccountIds(state.user.id)
+        } else {
+          allowedBankAccountIds.value = []
+        }
+        await loadData()
+      } else {
+        userProfile.value = null
+        allowedBankAccountIds.value = []
+      }
     })
   }
 
@@ -772,6 +865,10 @@ export const useAppStore = defineStore('useAppStore', () => {
     isLoading,
     isLoaded,
     authState,
+    userProfile,
+    isAdmin,
+    visibleCompanies,
+    visibleBankAccounts,
     selectedCompany,
     selectedAccount,
     accountsForSelectedCompany,
@@ -795,6 +892,7 @@ export const useAppStore = defineStore('useAppStore', () => {
     getQBAccounts,
     getQBVendors,
     initializeAuth,
-    signOut
+    signOut,
+    clearMustSetPassword
   }
 })

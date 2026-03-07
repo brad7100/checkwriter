@@ -4,9 +4,33 @@
       <div class="container">
         <div class="d-flex justify-content-between align-items-center mb-4">
           <h2>Manage Companies & Accounts</h2>
-          <button class="btn btn-primary" @click="showAddCompanyModal = true">
-            <i class="bi bi-plus-lg"></i> Add Company
-          </button>
+          <div class="d-flex gap-2">
+            <button class="btn btn-primary" @click="showAddCompanyModal = true">
+              <i class="bi bi-plus-lg"></i> Add Company
+            </button>
+          </div>
+        </div>
+
+        <!-- Invite user / Password reset (admin only) -->
+        <div class="card mb-4 border-primary">
+          <div class="card-body">
+            <h5 class="card-title"><i class="bi bi-people me-2"></i>Users</h5>
+            <p class="text-muted small mb-0">Only admins can add users. New users receive an email to set their password. After they sign in, assign them to bank accounts below.</p>
+            <div class="d-flex gap-2 align-items-end mt-3 flex-wrap">
+              <button class="btn btn-outline-primary" @click="showInviteUserModal = true">
+                <i class="bi bi-person-plus"></i> Invite user
+              </button>
+              <div class="d-flex gap-2 align-items-center">
+                <label class="form-label mb-0 small text-muted">Send password reset:</label>
+                <input type="email" class="form-control form-control-sm" style="width: 200px;" v-model="resetPasswordEmail" placeholder="user@example.com" />
+                <button class="btn btn-outline-secondary btn-sm" @click="sendPasswordReset" :disabled="resetPasswordLoading || !resetPasswordEmail.trim()">
+                  <span v-if="resetPasswordLoading" class="spinner-border spinner-border-sm me-1"></span>
+                  Send
+                </button>
+              </div>
+            </div>
+            <div v-if="resetPasswordMessage" class="small mt-2" :class="resetPasswordError ? 'text-danger' : 'text-success'">{{ resetPasswordMessage }}</div>
+          </div>
         </div>
         
         <!-- Companies with Nested Accounts -->
@@ -85,6 +109,20 @@
                             </button>
                             <button class="btn btn-outline-danger" @click="deleteAccount(account.id)">
                               <i class="bi bi-trash"></i> Delete
+                            </button>
+                          </div>
+                          <!-- User access (admin only) -->
+                          <div class="mt-3 pt-3 border-top">
+                            <strong class="small text-muted"><i class="bi bi-person-check me-1"></i>Users with access</strong>
+                            <ul v-if="getUsersForAccount(account.id).length > 0" class="list-unstyled small mb-2 mt-1">
+                              <li v-for="u in getUsersForAccount(account.id)" :key="u.id" class="d-flex align-items-center justify-content-between py-1">
+                                <span>{{ u.email }} <span v-if="u.role === 'admin'" class="badge bg-primary ms-1">Admin</span></span>
+                                <button type="button" class="btn btn-outline-danger btn-sm py-0 px-1" @click="removeUserFromAccount(u.linkId)" title="Remove access">×</button>
+                              </li>
+                            </ul>
+                            <p v-else class="small text-muted mb-1">No users assigned (admin always has access)</p>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" @click="openAddUserModal(account)">
+                              <i class="bi bi-person-plus"></i> Add user
                             </button>
                           </div>
                         </div>
@@ -237,18 +275,220 @@
       </div>
     </div>
 
+    <!-- Invite user modal -->
+    <div class="modal fade" :class="{ show: showInviteUserModal }" :style="{ display: showInviteUserModal ? 'block' : 'none' }" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Invite user</h5>
+            <button type="button" class="btn-close" @click="closeInviteUserModal"></button>
+          </div>
+          <div class="modal-body">
+            <p class="small text-muted">They will receive an email to set their password. After they sign in, assign them to bank accounts below.</p>
+            <label class="form-label">Email</label>
+            <input type="email" class="form-control" v-model="inviteUserEmail" placeholder="user@example.com" :disabled="inviteUserLoading" />
+            <div v-if="inviteUserError" class="alert alert-danger mt-2 mb-0">{{ inviteUserError }}</div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="closeInviteUserModal">Cancel</button>
+            <button type="button" class="btn btn-primary" @click="sendInvite" :disabled="inviteUserLoading || !inviteUserEmail.trim()">
+              <span v-if="inviteUserLoading" class="spinner-border spinner-border-sm me-2"></span>
+              Send invite
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add user to account modal -->
+    <div class="modal fade" :class="{ show: showAddUserModal }" :style="{ display: showAddUserModal ? 'block' : 'none' }" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Add user to account</h5>
+            <button type="button" class="btn-close" @click="closeAddUserModal"></button>
+          </div>
+          <div class="modal-body">
+            <p class="small text-muted">Account: <strong>{{ addUserTargetAccount?.name }}</strong></p>
+            <label class="form-label">User</label>
+            <select class="form-select" v-model="addUserSelectedProfileId">
+              <option value="">Select a user...</option>
+              <option v-for="p in availableProfilesForAccount" :key="p.id" :value="p.id">{{ p.email }} ({{ p.role }})</option>
+            </select>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="closeAddUserModal">Cancel</button>
+            <button type="button" class="btn btn-primary" @click="saveAddUserToAccount" :disabled="!addUserSelectedProfileId">Add</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Modal backdrop -->
-    <div class="modal-backdrop fade" :class="{ show: showAddCompanyModal || showEditCompanyModal || showAddAccountModal || showEditAccountModal }" 
-         :style="{ display: (showAddCompanyModal || showEditCompanyModal || showAddAccountModal || showEditAccountModal) ? 'block' : 'none' }"></div>
+    <div class="modal-backdrop fade" :class="{ show: showAddCompanyModal || showEditCompanyModal || showAddAccountModal || showEditAccountModal || showAddUserModal || showInviteUserModal }"
+         :style="{ display: (showAddCompanyModal || showEditCompanyModal || showAddAccountModal || showEditAccountModal || showAddUserModal || showInviteUserModal) ? 'block' : 'none' }"></div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useAppStore } from '../stores/app'
+import { supabase } from '../lib/supabase'
 import type { Company, BankAccount } from '../stores/app'
 
 const store = useAppStore()
+
+// User access (profiles + account_users)
+const profiles = ref<{ id: string; email: string; role: string }[]>([])
+const accountUsers = ref<{ id: string; user_id: string; bank_account_id: string }[]>([])
+const showAddUserModal = ref(false)
+const addUserTargetAccount = ref<BankAccount | null>(null)
+const addUserSelectedProfileId = ref('')
+
+// Invite user (admin-only, no public signup)
+const showInviteUserModal = ref(false)
+const inviteUserEmail = ref('')
+const inviteUserLoading = ref(false)
+const inviteUserError = ref('')
+
+// Send password reset to existing user
+const resetPasswordEmail = ref('')
+const resetPasswordLoading = ref(false)
+const resetPasswordMessage = ref('')
+const resetPasswordError = ref(false)
+
+const closeInviteUserModal = () => {
+  showInviteUserModal.value = false
+  inviteUserEmail.value = ''
+  inviteUserError.value = ''
+}
+
+const sendPasswordReset = async () => {
+  const email = resetPasswordEmail.value.trim()
+  if (!email) return
+  resetPasswordMessage.value = ''
+  resetPasswordError.value = false
+  resetPasswordLoading.value = true
+  try {
+    const { data, error } = await supabase.functions.invoke('invite-user', {
+      body: { email, action: 'reset' },
+    })
+    if (error) {
+      resetPasswordMessage.value = error.message || 'Failed to send reset'
+      resetPasswordError.value = true
+      return
+    }
+    const errMsg = (data && typeof data === 'object' && 'error' in data) ? (data as { error: string }).error : null
+    if (errMsg) {
+      resetPasswordMessage.value = errMsg
+      resetPasswordError.value = true
+      return
+    }
+    resetPasswordMessage.value = (data && typeof data === 'object' && 'message' in data) ? (data as { message: string }).message : 'Password reset email sent.'
+    resetPasswordEmail.value = ''
+  } catch (e) {
+    resetPasswordMessage.value = (e instanceof Error ? e.message : 'Request failed') + '. Is the invite-user function deployed?'
+    resetPasswordError.value = true
+  } finally {
+    resetPasswordLoading.value = false
+  }
+}
+
+const sendInvite = async () => {
+  const email = inviteUserEmail.value.trim()
+  if (!email) return
+  inviteUserError.value = ''
+  inviteUserLoading.value = true
+  try {
+    const { data, error } = await supabase.functions.invoke('invite-user', {
+      body: { email },
+    })
+    if (error) {
+      inviteUserError.value = error.message || 'Invite failed'
+      return
+    }
+    const errMsg = (data && typeof data === 'object' && 'error' in data) ? (data as { error: string }).error : null
+    if (errMsg) {
+      inviteUserError.value = errMsg
+      return
+    }
+    alert((data && typeof data === 'object' && 'message' in data) ? (data as { message: string }).message : 'Invitation sent.')
+    closeInviteUserModal()
+    await loadProfiles()
+  } catch (e) {
+    inviteUserError.value = (e instanceof Error ? e.message : 'Request failed') +
+      '. If the invite-user function is not deployed, run: supabase functions deploy invite-user'
+  } finally {
+    inviteUserLoading.value = false
+  }
+}
+
+const getUsersForAccount = (accountId: string) => {
+  const links = accountUsers.value.filter(au => au.bank_account_id === accountId)
+  return links.map(au => {
+    const p = profiles.value.find(pr => pr.id === au.user_id)
+    return { id: au.user_id, linkId: au.id, email: p?.email ?? 'Unknown', role: p?.role ?? 'user' }
+  })
+}
+
+const availableProfilesForAccount = computed(() => {
+  if (!addUserTargetAccount.value) return []
+  const already = accountUsers.value.filter(au => au.bank_account_id === addUserTargetAccount.value!.id).map(au => au.user_id)
+  return profiles.value.filter(p => !already.includes(p.id))
+})
+
+const openAddUserModal = (account: BankAccount) => {
+  addUserTargetAccount.value = account
+  addUserSelectedProfileId.value = ''
+  showAddUserModal.value = true
+}
+
+const closeAddUserModal = () => {
+  showAddUserModal.value = false
+  addUserTargetAccount.value = null
+  addUserSelectedProfileId.value = ''
+}
+
+const saveAddUserToAccount = async () => {
+  if (!addUserTargetAccount.value || !addUserSelectedProfileId.value) return
+  const { error } = await supabase.from('account_users').insert([{
+    user_id: addUserSelectedProfileId.value,
+    bank_account_id: addUserTargetAccount.value.id
+  }])
+  if (error) {
+    alert('Could not add user: ' + error.message)
+    return
+  }
+  await loadAccountUsers()
+  closeAddUserModal()
+}
+
+const removeUserFromAccount = async (linkId: string) => {
+  if (!confirm('Remove this user’s access to this account?')) return
+  const { error } = await supabase.from('account_users').delete().eq('id', linkId)
+  if (error) {
+    alert('Could not remove: ' + error.message)
+    return
+  }
+  await loadAccountUsers()
+}
+
+async function loadAccountUsers() {
+  const { data } = await supabase.from('account_users').select('id, user_id, bank_account_id')
+  accountUsers.value = data ?? []
+}
+
+async function loadProfiles() {
+  const { data } = await supabase.from('profiles').select('id, email, role')
+  profiles.value = (data ?? []) as { id: string; email: string; role: string }[]
+}
+
+onMounted(async () => {
+  if (store.isAdmin) {
+    await loadProfiles()
+    await loadAccountUsers()
+  }
+})
 
 // Modal visibility
 const showAddCompanyModal = ref(false)

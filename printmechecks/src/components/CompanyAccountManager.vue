@@ -6,11 +6,11 @@
         <div class="input-group">
           <select class="form-select" v-model="store.selectedCompanyId" @change="onCompanyChange">
             <option value="">Select a company...</option>
-            <option v-for="company in store.companies" :key="company.id" :value="company.id">
+            <option v-for="company in store.visibleCompanies" :key="company.id" :value="company.id">
               {{ company.name }}
             </option>
           </select>
-          <button class="btn btn-outline-secondary" type="button" @click="showAddCompanyModal = true" title="Add New Company">
+          <button v-if="store.isAdmin" class="btn btn-outline-secondary" type="button" @click="showAddCompanyModal = true" title="Add New Company">
             <i class="bi bi-plus"></i>
           </button>
         </div>
@@ -25,7 +25,7 @@
               {{ account.name }} ({{ account.bankName }})
             </option>
           </select>
-          <button class="btn btn-outline-secondary" type="button" @click="showAddAccountModal = true" :disabled="!store.selectedCompanyId" title="Add New Account">
+          <button v-if="store.isAdmin" class="btn btn-outline-secondary" type="button" @click="showAddAccountModal = true" :disabled="!store.selectedCompanyId" title="Add New Account">
             <i class="bi bi-plus"></i>
           </button>
         </div>

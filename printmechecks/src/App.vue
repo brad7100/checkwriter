@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RouterLink, RouterView, useRouter } from 'vue-router'
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
 import { useAppStore } from './stores/app'
 import { migrateLocalStorageToSupabase } from './utils/migrateToSupabase'
 import { authService } from './lib/auth'
@@ -27,11 +27,12 @@ const handleSignOut = async () => {
 // Check for QuickBooks OAuth callback
 onMounted(async () => {
   console.log('App mounted - checking auth state')
-  
+  store.initializeAuth()
+
   // Check if user is logged in
   const { data: { session } } = await supabase.auth.getSession()
   console.log('Initial session:', session)
-  
+
   if (session?.user) {
     isAuthenticated.value = true
     userEmail.value = session.user.email || ''
@@ -59,6 +60,13 @@ onMounted(async () => {
       router.push('/auth')
     }
   })
+
+  // When profile loads and invited user must set password, redirect to set-password
+  watch(() => store.userProfile, (profile) => {
+    if (profile?.must_set_password && router.currentRoute.value.name !== 'set-password') {
+      router.replace({ name: 'set-password' })
+    }
+  }, { immediate: true })
   const urlParams = new URLSearchParams(window.location.search)
   const qbConnected = urlParams.get('qb_connected')
   const companyId = urlParams.get('company_id')
@@ -178,6 +186,7 @@ const createNewCheck = () => {
           <div class="d-flex justify-content-between align-items-center mb-3">
               <div class="user-info">
                   <span class="text-muted">Welcome, {{ userEmail }}</span>
+                  <span v-if="store.isAdmin" class="badge bg-primary ms-2">Admin</span>
               </div>
               <div class="d-flex gap-2">
                   <button class="btn btn-success" @click="createNewCheck">
@@ -196,7 +205,7 @@ const createNewCheck = () => {
               <li class="nav-item">
                   <RouterLink to="/history" class="nav-link" :class="{'active': $route.path == '/history'}">History</RouterLink>
               </li>
-              <li class="nav-item">
+              <li class="nav-item" v-if="store.isAdmin">
                   <RouterLink to="/manage" class="nav-link" :class="{'active': $route.path == '/manage'}">Manage</RouterLink>
               </li>
               <li class="nav-item">

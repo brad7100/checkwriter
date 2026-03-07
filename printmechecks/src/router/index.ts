@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '../views/HomeView.vue'
 import AuthView from '../views/AuthView.vue'
+import { useAppStore } from '../stores/app'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -9,6 +10,12 @@ const router = createRouter({
       path: '/auth',
       name: 'auth',
       component: AuthView
+    },
+    {
+      path: '/set-password',
+      name: 'set-password',
+      component: () => import('../views/SetPasswordView.vue'),
+      meta: { requiresAuth: true }
     },
     {
       path: '/',
@@ -26,7 +33,7 @@ const router = createRouter({
       path: '/manage',
       name: 'manage',
       component: () => import('../views/ManageView.vue'),
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true, requiresAdmin: true }
     },
     {
       path: '/layouts',
@@ -43,17 +50,32 @@ const router = createRouter({
   ]
 })
 
-// Navigation guard for authentication
+// Navigation guard: require auth, redirect invite users to set password, admin-only routes
 router.beforeEach((to, from, next) => {
-  // Check if route requires authentication
+  const store = useAppStore()
+  const isSetPassword = to.name === 'set-password'
+
   if (to.meta.requiresAuth) {
-    // Check if user is authenticated
-    // For now, we'll let the App.vue handle the authentication check
-    // This ensures the auth state is properly loaded before checking
-    next()
-  } else {
-    next()
+    if (store.userProfile?.must_set_password && !isSetPassword) {
+      next({ name: 'set-password' })
+      return
+    }
+    if (isSetPassword && !store.userProfile?.must_set_password) {
+      next({ path: '/' })
+      return
+    }
   }
+  if (to.meta.requiresAdmin) {
+    if (!store.userProfile) {
+      next({ path: '/' })
+      return
+    }
+    if (store.userProfile.role !== 'admin') {
+      next({ path: '/' })
+      return
+    }
+  }
+  next()
 })
 
 export default router

@@ -32,7 +32,7 @@
                 <label class="form-label"><strong>Filter by Account:</strong></label>
                 <select class="form-select" v-model="filterAccountId">
                     <option value="">All Accounts</option>
-                    <option v-for="account in store.bankAccounts" :key="account.id" :value="account.id">
+                    <option v-for="account in store.visibleBankAccounts" :key="account.id" :value="account.id">
                         {{ account.name }} ({{ account.bankName }})
                     </option>
                 </select>
@@ -170,7 +170,7 @@
                                 <label class="form-label">Account</label>
                                 <select class="form-select" v-model="advancedSearch.accountId">
                                     <option value="">All Accounts</option>
-                                    <option v-for="account in store.bankAccounts" :key="account.id" :value="account.id">
+                                    <option v-for="account in store.visibleBankAccounts" :key="account.id" :value="account.id">
                                         {{ account.name }} ({{ account.bankName }})
                                     </option>
                                 </select>
@@ -375,7 +375,7 @@ const selectAllUnprinted = () => {
 }
 
 const getAccountName = (accountId: string) => {
-  const account = store.bankAccounts.find(a => a.id === accountId)
+  const account = store.visibleBankAccounts.find(a => a.id === accountId) ?? store.bankAccounts.find(a => a.id === accountId)
   return account ? account.name : 'Unknown'
 }
 

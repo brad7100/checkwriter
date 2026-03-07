@@ -4,8 +4,8 @@
             
             
             <div style="position: relative;" id="check-box-print">
-                <!-- No Account Selected Overlay -->
-                <div v-if="!state.selectedAccountId" class="no-account-overlay">
+                <!-- No Account Selected Overlay: show when no account or account not assigned to user -->
+                <div v-if="!hasValidSelectedAccount" class="no-account-overlay">
                     <div class="no-account-message">
                         <i class="bi bi-exclamation-triangle-fill"></i>
                         <h3>No Account Selected</h3>
@@ -13,38 +13,38 @@
                     </div>
                 </div>
 
-                <!-- Original Layout -->
+                <!-- Original Layout: only show account data when user has a valid selected account -->
                 <template v-if="!currentTemplate">
-                <div class="account-holder-name" style="position: absolute; top: 40px; left: 60px">{{check.accountHolderName}}</div>
+                <div class="account-holder-name" style="position: absolute; top: 40px; left: 60px">{{hasValidSelectedAccount ? check.accountHolderName : ''}}</div>
                 <div class="account-holder-address" style="position: absolute; top: 70px; left: 60px">
-                    {{check.accountHolderAddress}}<br>
-                    {{check.accountHolderCity}}, {{check.accountHolderState}} {{check.accountHolderZip}}
+                    <template v-if="hasValidSelectedAccount">{{check.accountHolderAddress}}<br>
+                    {{check.accountHolderCity}}, {{check.accountHolderState}} {{check.accountHolderZip}}</template>
                 </div>
-                <div class="check-number-human" style="position: absolute; top: 40px; left: 1060px">{{check.checkNumber}}</div>
-                <div class="date-data" style="position: absolute; top: 80px; left: 850px">{{check.date}}</div>
+                <div class="check-number-human" style="position: absolute; top: 40px; left: 1060px">{{hasValidSelectedAccount ? check.checkNumber : ''}}</div>
+                <div class="date-data" style="position: absolute; top: 80px; left: 850px">{{hasValidSelectedAccount ? check.date : ''}}</div>
                 <div class="date" style="position: absolute; top: 90px; left: 760px">Date: _____________________ </div>
                 <div class="amount-box" style="position: absolute; top: 175px; left: 950px">
 
                 </div>
-                    <div class="amount-data" style="position: absolute; top: 182px; left: 970px">$ {{formatMoney(check.amount)}}</div>
-                <div class="pay-to-data" style="position: absolute; top: 180px; left: 180px">{{check.payTo}}</div>
+                    <div class="amount-data" style="position: absolute; top: 182px; left: 970px">{{hasValidSelectedAccount ? '$ ' + formatMoney(check.amount) : ''}}</div>
+                <div class="pay-to-data" style="position: absolute; top: 180px; left: 180px">{{hasValidSelectedAccount ? check.payTo : ''}}</div>
                 <div class="pay-to" style="position: absolute; top: 170px; left: 60px">
                     Pay to the <br>Order of <span class="payto-line"></span>
                 </div>
                 <div class="amount-line-data" ref="line" style="position: absolute; top: 240px; left: 100px">
-                    ***
+                    <template v-if="hasValidSelectedAccount">***
                     {{toWords(check.amount)}} 
-                    ***
+                    ***</template>
                 </div>
                 <div class="amount-line" style="position: absolute; top: 250px; left: 60px">
                     <span class="dollar-line"></span>
                 </div>
-                <div class="bank-name" style="position: absolute; top: 300px; left: 60px">{{check.bankName}}</div>
-                <div class="memo-data" style="position: absolute; top: 367px; left: 120px">{{check.memo}}</div>
+                <div class="bank-name" style="position: absolute; top: 300px; left: 60px">{{hasValidSelectedAccount ? check.bankName : ''}}</div>
+                <div class="memo-data" style="position: absolute; top: 367px; left: 120px">{{hasValidSelectedAccount ? check.memo : ''}}</div>
                 <div class="memo" style="position: absolute; top: 390px; left: 60px">
                     Memo: ____________________________________
                 </div>
-                <div class="signature-data" style="position: absolute; top: 366px; left: 770px">{{check.signature}}</div>
+                <div class="signature-data" style="position: absolute; top: 366px; left: 770px">{{hasValidSelectedAccount ? check.signature : ''}}</div>
                 <div class="signature" style="position: absolute; top: 390px; left: 750px">
                     _________________________________________________
                 </div>
@@ -78,8 +78,8 @@
                 
                 
                 
-                <!-- Fixed MICR Line (only show if account is selected and not preprinted) -->
-                <div v-if="state.selectedAccountId && !isPreprinted" class="banking" style="position: absolute; top: 420px; left: 147px">
+                <!-- Fixed MICR Line (only show if user has valid account selected and not preprinted) -->
+                <div v-if="hasValidSelectedAccount && !isPreprinted" class="banking" style="position: absolute; top: 420px; left: 147px">
                     <div class="routing" style="display: inline;">
                         a{{check.routingNumber}}a
                     </div>
@@ -205,6 +205,11 @@ const state = useAppStore()
 const router = useRouter()
 const isPreprinted = ref(false)
 
+// Only treat as "account selected" when it's one the user is allowed to see (avoids showing another account in background)
+const hasValidSelectedAccount = computed(() =>
+  !!state.selectedAccountId && state.visibleBankAccounts.some((a) => a.id === state.selectedAccountId)
+)
+
 // Template switching
 const selectedTemplateId = ref('original')
 const selectedStubTemplateId = ref('default')
@@ -251,8 +256,9 @@ const currentStubTemplate = computed(() => {
 
 // (No fixed check number overlay; add as a field in layout editor)
 
-// Check box style with color filter as background gradient
+// Check box style with color filter as background gradient (only when user has valid selected account)
 const checkBoxStyle = computed(() => {
+  if (!hasValidSelectedAccount.value) return {}
   if (state.selectedAccount?.backgroundColor) {
     // Convert hex to rgba with 20% opacity for overlay
     const hex = state.selectedAccount.backgroundColor
@@ -343,6 +349,7 @@ const getElementStyle = (element: any) => {
 
 
 const getDataValue = (dataBinding: string) => {
+  if (!hasValidSelectedAccount.value) return ''
   switch (dataBinding) {
     case 'accountHolderName':
       return state.selectedCompany?.name || 'Company Name'

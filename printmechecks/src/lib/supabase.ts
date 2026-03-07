@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 
 // Supabase configuration
-const supabaseUrl = 'https://cffhvhgvaidwofyceoju.supabase.co'
+export const supabaseUrl = 'https://cffhvhgvaidwofyceoju.supabase.co'
 const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNmZmh2aGd2YWlkd29meWNlb2p1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk2ODUwOTMsImV4cCI6MjA3NTI2MTA5M30.AXL9vIG4i_SlNPFq-211HoR_PubKg1TtCHo4kWR6kPU'
 
 // Create Supabase client
@@ -11,6 +11,28 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 export interface Database {
   public: {
     Tables: {
+      profiles: {
+        Row: {
+          id: string
+          email: string
+          role: 'admin' | 'user'
+          must_set_password?: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: { id: string; email: string; role?: 'admin' | 'user'; must_set_password?: boolean; created_at?: string; updated_at?: string }
+        Update: { id?: string; email?: string; role?: 'admin' | 'user'; must_set_password?: boolean; created_at?: string; updated_at?: string }
+      }
+      account_users: {
+        Row: {
+          id: string
+          user_id: string
+          bank_account_id: string
+          created_at: string
+        }
+        Insert: { id?: string; user_id: string; bank_account_id: string; created_at?: string }
+        Update: { id?: string; user_id?: string; bank_account_id?: string; created_at?: string }
+      }
       companies: {
         Row: {
           id: string
