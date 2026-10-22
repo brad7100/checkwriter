@@ -81,12 +81,12 @@ BEGIN
   
   -- Generate a secure random key (32 bytes = 256 bits)
   -- Format: sbmt_<base64url>
-  v_api_key := 'sbmt_' || encode(gen_random_bytes(32), 'base64');
+  v_api_key := 'sbmt_' || encode(extensions.gen_random_bytes(32), 'base64');
   v_api_key := replace(replace(replace(v_api_key, '+', '-'), '/', '_'), '=', '');
   
   -- Hash the key before storing (SHA-256)
   -- Only the hash is stored, the plain key is returned once
-  v_key_hash := encode(digest(v_api_key, 'sha256'), 'hex');
+  v_key_hash := encode(extensions.digest(v_api_key, 'sha256'), 'hex');
   
   -- Calculate expiration
   IF p_expires_days IS NOT NULL THEN
