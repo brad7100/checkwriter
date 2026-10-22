@@ -129,10 +129,13 @@ export const useAppStore = defineStore('useAppStore', () => {
   })
 
   // Current user's profile (role, must_set_password) for permission checks
-  const userProfile = ref<{ id: string; email: string; role: 'admin' | 'user'; must_set_password?: boolean } | null>(null)
+  const userProfile = ref<{ id: string; email: string; role: 'admin' | 'user' | 'submitter' | 'approver'; must_set_password?: boolean } | null>(null)
 
   // Non-admin: list of bank account IDs this user can access (from account_users)
   const allowedBankAccountIds = ref<string[]>([])
+  
+  // Pending approval count for badge
+  const pendingApprovalCount = ref(0)
 
   // Computed
   const isAdmin = computed(() => userProfile.value?.role === 'admin')
@@ -195,9 +198,30 @@ export const useAppStore = defineStore('useAppStore', () => {
         role: data.role,
         must_set_password: data.must_set_password ?? false
       } : null
+      
+      // Load pending approval count if user is approver or admin
+      if (data && (data.role === 'approver' || data.role === 'admin')) {
+        await loadPendingApprovalCount()
+      }
     } catch (e) {
       console.warn('fetchUserProfile error:', e)
       userProfile.value = null
+    }
+  }
+  
+  // Load count of pending checks for approval badge
+  const loadPendingApprovalCount = async () => {
+    try {
+      const { count, error } = await supabase
+        .from('checks')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending')
+      
+      if (error) throw error
+      pendingApprovalCount.value = count || 0
+    } catch (e) {
+      console.error('Failed to load pending approval count:', e)
+      pendingApprovalCount.value = 0
     }
   }
 
@@ -866,6 +890,7 @@ export const useAppStore = defineStore('useAppStore', () => {
     isLoaded,
     authState,
     userProfile,
+    pendingApprovalCount,
     isAdmin,
     visibleCompanies,
     visibleBankAccounts,
@@ -893,6 +918,7 @@ export const useAppStore = defineStore('useAppStore', () => {
     getQBVendors,
     initializeAuth,
     signOut,
-    clearMustSetPassword
+    clearMustSetPassword,
+    loadPendingApprovalCount
   }
 })
