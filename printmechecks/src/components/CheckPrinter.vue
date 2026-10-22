@@ -908,11 +908,16 @@ async function printCheck () {
 
 async function saveToHistory () {
     try {
-        // Get current user
+        // Get current user and role
         const { data: { user } } = await supabase.auth.getUser()
+        const userRole = state.userProfile?.role
         
-        // Save as draft/pending
-        check.status = 'pending'
+        // Approvers and admins can save their own checks as approved
+        // (no need for self-approval; they can print immediately)
+        // Submitters save as pending
+        const isApproverOrAdmin = userRole === 'approver' || userRole === 'admin'
+        
+        check.status = isApproverOrAdmin ? 'approved' : 'pending'
         check.isPrinted = false
         check.printedDate = null
         check.created_by = user?.id
@@ -1032,7 +1037,8 @@ const check = reactive({
     printedDate: null,
     status: 'pending',
     created_by: null,
-    reprint_count: 0
+    reprint_count: 0,
+    is_legacy: false
 })
 
 // Initialize check data asynchronously

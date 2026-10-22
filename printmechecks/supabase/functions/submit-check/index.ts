@@ -4,9 +4,21 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
+// CORS restricted to app origin via environment variable
+const allowedOrigin = Deno.env.get('ALLOWED_ORIGIN') || '*'
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': allowedOrigin,
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-submitter-key',
+}
+
+// Hash function for API keys (SHA-256)
+async function hashApiKey(key: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(key)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+  return hashHex
 }
 
 interface CheckSubmission {
@@ -41,11 +53,14 @@ Deno.serve(async (req) => {
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey)
 
+    // Hash the submitted key to compare with stored hash
+    const keyHash = await hashApiKey(submitterKey)
+
     // Verify the submitter key against stored keys in the database
     const { data: keyData, error: keyError } = await adminClient
       .from('submitter_api_keys')
       .select('id, user_id, name, is_active, last_used_at')
-      .eq('key_hash', submitterKey)
+      .eq('key_hash', keyHash)
       .eq('is_active', true)
       .single()
 
@@ -139,20 +154,26 @@ Deno.serve(async (req) => {
 
     const hasDuplicates = duplicates && duplicates.length > 0
 
-    // Generate check number if not provided
+    // Generate check number if not provided (compute numerically)
     let checkNumber = check.check_number
     if (!checkNumber) {
-      // Get the highest check number for this account
-      const { data: lastCheck } = await adminClient
+      // Get all check numbers for this account and find the highest numeric value
+      const { data: checks } = await adminClient
         .from('checks')
         .select('check_number')
         .eq('account_id', check.account_id)
-        .order('check_number', { ascending: false })
-        .limit(1)
-        .single()
 
-      const lastNum = lastCheck?.check_number ? parseInt(lastCheck.check_number) : 1000
-      checkNumber = (lastNum + 1).toString()
+      let maxNum = 1000
+      if (checks && checks.length > 0) {
+        checks.forEach((c: any) => {
+          const num = parseInt(c.check_number, 10)
+          if (!isNaN(num) && num > maxNum) {
+            maxNum = num
+          }
+        })
+      }
+      
+      checkNumber = (maxNum + 1).toString()
     }
 
     // Build the full check object
@@ -179,6 +200,7 @@ Deno.serve(async (req) => {
       status: 'pending',
       created_by: keyData.user_id,
       is_printed: false,
+      is_legacy: false,  // New checks are not legacy
     }
 
     // Insert the check

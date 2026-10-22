@@ -61,6 +61,7 @@ RETURNS TABLE(
 ) AS $$
 DECLARE
   v_api_key TEXT;
+  v_key_hash TEXT;
   v_key_id UUID;
   v_expires_at TIMESTAMPTZ;
 BEGIN
@@ -83,13 +84,16 @@ BEGIN
   v_api_key := 'sbmt_' || encode(gen_random_bytes(32), 'base64');
   v_api_key := replace(replace(replace(v_api_key, '+', '-'), '/', '_'), '=', '');
   
+  -- Hash the key before storing (SHA-256)
+  -- Only the hash is stored, the plain key is returned once
+  v_key_hash := encode(digest(v_api_key, 'sha256'), 'hex');
+  
   -- Calculate expiration
   IF p_expires_days IS NOT NULL THEN
     v_expires_at := NOW() + (p_expires_days || ' days')::INTERVAL;
   END IF;
   
-  -- Store the key (in production, you'd hash this)
-  -- For simplicity, we're storing it directly since it's already a random token
+  -- Store the hashed key
   INSERT INTO public.submitter_api_keys (
     user_id,
     name,
@@ -99,12 +103,12 @@ BEGIN
   ) VALUES (
     p_user_id,
     p_name,
-    v_api_key,  -- In production, use pgcrypto crypt() or similar
+    v_key_hash,  -- Store hash, not plain key
     v_expires_at,
     auth.uid()
   ) RETURNING id INTO v_key_id;
   
-  -- Return the key (only time it will be shown!)
+  -- Return the plain key (only time it will be shown!)
   RETURN QUERY
   SELECT v_api_key, v_key_id, p_user_id, p_name, v_expires_at;
 END;
@@ -154,6 +158,6 @@ GRANT EXECUTE ON FUNCTION public.revoke_submitter_api_key(UUID) TO authenticated
 
 -- 8. Comments
 COMMENT ON TABLE public.submitter_api_keys IS 'API keys for automated check submission bots';
-COMMENT ON COLUMN public.submitter_api_keys.key_hash IS 'The API key value (should be hashed in production)';
+COMMENT ON COLUMN public.submitter_api_keys.key_hash IS 'SHA-256 hash of the API key (never stores plain key)';
 COMMENT ON COLUMN public.submitter_api_keys.last_used_at IS 'Automatically updated when key is used';
-COMMENT ON FUNCTION public.generate_submitter_api_key IS 'Generate a new API key for bot check submission';
+COMMENT ON FUNCTION public.generate_submitter_api_key IS 'Generate a new API key for bot check submission (returns plain key once, stores hash)';

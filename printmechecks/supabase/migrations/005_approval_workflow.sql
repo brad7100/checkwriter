@@ -43,27 +43,47 @@ BEGIN
 END $$;
 
 -- 2. Add check status and workflow fields to checks table
+-- Add is_legacy flag FIRST (needed for backfill logic below)
+ALTER TABLE public.checks 
+  ADD COLUMN IF NOT EXISTS is_legacy BOOLEAN DEFAULT false;
+
+-- Mark all existing checks as legacy (before this migration)
+UPDATE public.checks 
+SET is_legacy = true 
+WHERE is_legacy = false OR is_legacy IS NULL;
+
 -- Use default 'printed' for existing checks to preserve their state
 ALTER TABLE public.checks 
   ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'printed' 
     CHECK (status IN ('pending', 'approved', 'rejected', 'printed', 'void'));
 
 -- For existing checks, ensure status is set based on is_printed flag
+-- 454 printed checks → 'printed'
+-- 28 unprinted checks → 'approved' (ready to print, preserves workflow)
 DO $$
+DECLARE
+  v_printed_count INT;
+  v_approved_count INT;
 BEGIN
-  -- Set status to 'printed' for all existing checks that were printed
+  -- Set status to 'printed' for existing printed checks
   UPDATE public.checks 
   SET status = 'printed'
-  WHERE status IS NULL 
-    OR (status = 'printed' AND is_printed = true);
+  WHERE is_printed = true 
+    AND (status IS NULL OR status = 'printed');
   
-  -- Any existing checks that weren't printed should be 'approved' (rare edge case)
+  GET DIAGNOSTICS v_printed_count = ROW_COUNT;
+  
+  -- Set status to 'approved' for existing unprinted checks
+  -- These are ready to print, same workflow as today
   UPDATE public.checks 
   SET status = 'approved'
   WHERE is_printed = false 
-    AND status = 'printed';
-    
-  RAISE NOTICE 'Existing checks backfilled: printed checks marked as status=printed';
+    AND is_legacy = true;
+  
+  GET DIAGNOSTICS v_approved_count = ROW_COUNT;
+  
+  RAISE NOTICE 'Existing checks backfilled: % printed, % approved (ready to print)', 
+    v_printed_count, v_approved_count;
 END $$;
 
 ALTER TABLE public.checks 
@@ -106,6 +126,8 @@ ALTER TABLE public.checks
 ALTER TABLE public.checks 
   ADD COLUMN IF NOT EXISTS business_unit TEXT;
 
+-- is_legacy flag was already added above (before status backfill)
+
 -- 3. Create audit log table for check changes
 CREATE TABLE IF NOT EXISTS public.check_audit_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -146,10 +168,18 @@ CREATE INDEX IF NOT EXISTS idx_checks_created_by ON public.checks(created_by);
 CREATE INDEX IF NOT EXISTS idx_checks_approved_by ON public.checks(approved_by);
 CREATE INDEX IF NOT EXISTS idx_checks_approved_at ON public.checks(approved_at);
 
--- 6. Ensure check numbers are unique per account
+-- 6. Ensure check numbers are unique per account (only for new checks)
+-- Existing checks have duplicates that must be preserved:
+-- - Account ••7857 #1372 (twice)
+-- - Account ••7857 #1394 (twice)  
+-- - Account ••0992 #20025 (twice)
+-- Solution: Partial unique index only on non-legacy checks
 CREATE UNIQUE INDEX IF NOT EXISTS idx_checks_unique_number_per_account 
   ON public.checks(account_id, check_number) 
-  WHERE status != 'void';
+  WHERE is_legacy = false AND status != 'void';
+
+COMMENT ON INDEX idx_checks_unique_number_per_account IS 
+  'Enforces unique check numbers per account for new checks only. Legacy checks may have duplicates.';
 
 -- 7. Helper function: get user's role
 CREATE OR REPLACE FUNCTION public.get_user_role()
@@ -217,7 +247,7 @@ BEGIN
     c.status
   FROM public.checks c
   WHERE c.account_id = p_account_id
-    AND c.pay_to = p_payee
+    AND c.payee = p_payee
     AND c.amount = p_amount
     AND c.status IN ('pending', 'approved', 'printed')
     AND c.created_at > NOW() - INTERVAL '7 days'
@@ -225,7 +255,70 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 12. Trigger to automatically log check creation
+-- 12. BEFORE UPDATE trigger to enforce status transitions
+-- This replaces the OLD/NEW logic in RLS which doesn't work
+CREATE OR REPLACE FUNCTION public.trigger_enforce_status_transitions()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_user_role TEXT;
+  v_is_admin BOOLEAN;
+  v_is_approver BOOLEAN;
+BEGIN
+  -- Get user role
+  SELECT role INTO v_user_role FROM public.profiles WHERE id = auth.uid();
+  v_is_admin := (v_user_role = 'admin');
+  v_is_approver := (v_user_role IN ('approver', 'admin'));
+  
+  -- If status hasn't changed, allow (editing other fields)
+  IF OLD.status = NEW.status THEN
+    RETURN NEW;
+  END IF;
+  
+  -- Admins can change any status
+  IF v_is_admin THEN
+    RETURN NEW;
+  END IF;
+  
+  -- Can't change printed checks (except admins for reprint/void)
+  IF OLD.status = 'printed' AND NOT v_is_admin THEN
+    RAISE EXCEPTION 'Cannot modify printed checks. Contact an admin.';
+  END IF;
+  
+  -- Can't un-void checks
+  IF OLD.status = 'void' THEN
+    RAISE EXCEPTION 'Cannot modify voided checks.';
+  END IF;
+  
+  -- Submitters can ONLY keep checks as pending (editing while pending is OK in RLS)
+  IF v_user_role = 'submitter' AND NEW.status != 'pending' THEN
+    RAISE EXCEPTION 'Submitters cannot approve or print checks. Submit for approval.';
+  END IF;
+  
+  -- Approvers can approve/reject/print
+  IF v_is_approver THEN
+    -- Validate transitions
+    IF OLD.status = 'pending' AND NEW.status IN ('pending', 'approved', 'rejected') THEN
+      RETURN NEW;
+    ELSIF OLD.status = 'approved' AND NEW.status IN ('approved', 'printed', 'void') THEN
+      RETURN NEW;
+    ELSE
+      RAISE EXCEPTION 'Invalid status transition from % to %', OLD.status, NEW.status;
+    END IF;
+  END IF;
+  
+  -- If we get here, transition not allowed
+  RAISE EXCEPTION 'Invalid status transition from % to % for role %', OLD.status, NEW.status, v_user_role;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+DROP TRIGGER IF EXISTS enforce_status_transitions ON public.checks;
+CREATE TRIGGER enforce_status_transitions
+  BEFORE UPDATE ON public.checks
+  FOR EACH ROW
+  WHEN (OLD.status IS DISTINCT FROM NEW.status)
+  EXECUTE FUNCTION public.trigger_enforce_status_transitions();
+
+-- 13. Trigger to automatically log check creation
 CREATE OR REPLACE FUNCTION public.trigger_log_check_creation()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -237,14 +330,14 @@ BEGIN
   );
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 DROP TRIGGER IF EXISTS on_check_created ON public.checks;
 CREATE TRIGGER on_check_created
   AFTER INSERT ON public.checks
   FOR EACH ROW EXECUTE FUNCTION public.trigger_log_check_creation();
 
--- 13. Trigger to log check updates
+-- 14. Trigger to log check updates
 CREATE OR REPLACE FUNCTION public.trigger_log_check_update()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -280,12 +373,12 @@ CREATE TRIGGER on_check_updated
   AFTER UPDATE ON public.checks
   FOR EACH ROW EXECUTE FUNCTION public.trigger_log_check_update();
 
--- 14. Trigger to add to duplicate tracking on creation
+-- 15. Trigger to add to duplicate tracking on creation
 CREATE OR REPLACE FUNCTION public.trigger_track_duplicate()
 RETURNS TRIGGER AS $$
 BEGIN
   INSERT INTO public.check_duplicates (account_id, payee, amount, check_id)
-  VALUES (NEW.account_id, NEW.pay_to, NEW.amount, NEW.id);
+  VALUES (NEW.account_id, NEW.payee, NEW.amount, NEW.id);
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -295,7 +388,7 @@ CREATE TRIGGER on_check_created_track_duplicate
   AFTER INSERT ON public.checks
   FOR EACH ROW EXECUTE FUNCTION public.trigger_track_duplicate();
 
--- 15. Clean up old duplicate tracking entries (keep only 7 days)
+-- 16. Clean up old duplicate tracking entries (keep only 7 days)
 CREATE OR REPLACE FUNCTION public.cleanup_old_duplicate_tracking()
 RETURNS void AS $$
 BEGIN
@@ -304,7 +397,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 16. Update RLS policies for checks table
+-- 17. Update RLS policies for checks table
 -- Drop old policies (including any from migration 003)
 DROP POLICY IF EXISTS "Checks: select if admin or account access" ON public.checks;
 DROP POLICY IF EXISTS "Checks: insert if admin or account access" ON public.checks;
@@ -362,8 +455,9 @@ CREATE POLICY "Checks: insert based on role"
     )
   );
 
--- UPDATE: Complex rules based on status and role
-CREATE POLICY "Checks: update based on status and role"
+-- UPDATE: Rules based on role and ownership
+-- Status transitions enforced by trigger (below), not RLS
+CREATE POLICY "Checks: update based on role and ownership"
   ON public.checks FOR UPDATE
   USING (
     -- Must have account access
@@ -378,69 +472,23 @@ CREATE POLICY "Checks: update based on status and role"
     AND (
       -- Admins can update anything
       public.is_admin()
-      -- Submitters can edit their own pending checks
-      OR (
-        created_by = auth.uid()
-        AND status = 'pending'
-        AND public.get_user_role() IN ('submitter', 'approver')
-      )
-      -- Approvers can approve/reject/edit pending checks (but not their own unless can_self_approve)
+      -- Approvers can:
+      --   - Update their own checks
+      --   - Update others' checks with account access
+      --   - Legacy checks (created_by IS NULL)
       OR (
         public.can_approve_checks()
-        AND status IN ('pending', 'approved')
         AND (
-          created_by != auth.uid() 
-          OR EXISTS (
-            SELECT 1 FROM public.profiles 
-            WHERE id = auth.uid() 
-            AND can_self_approve = true
-          )
+          created_by = auth.uid()
+          OR created_by IS NULL  -- Legacy/historical checks
+          OR status IN ('pending', 'approved')  -- Can approve/print others' checks
         )
       )
-    )
-  )
-  WITH CHECK (
-    -- Enforce valid status transitions and prevent direct status manipulation
-    (
-      -- Can't change printed checks without admin override
-      (OLD.status != 'printed' OR public.is_admin())
-      -- Can't un-void checks
-      AND (OLD.status != 'void' OR public.is_admin())
-      -- Valid status transitions
-      AND (
-        (OLD.status = 'pending' AND NEW.status IN ('pending', 'approved', 'rejected'))
-        OR (OLD.status = 'approved' AND NEW.status IN ('approved', 'printed', 'void'))
-        OR (OLD.status = 'printed' AND NEW.status IN ('printed', 'void') AND public.is_admin())
-        OR (OLD.status = 'rejected' AND NEW.status = 'rejected')
-        OR (OLD.status = 'void' AND NEW.status = 'void')
-      )
-      -- Role-based status change rules
-      AND (
-        -- Admins can change any status
-        public.is_admin()
-        -- Approvers can:
-        --   - Update their own checks to any valid status (for their workflow)
-        --   - Approve/reject others' pending checks
-        --   - Print approved checks
-        OR (
-          public.get_user_role() = 'approver'
-          AND (
-            -- Own checks: approver created it, can update freely within valid transitions
-            created_by = auth.uid()
-            -- Others' checks: can only approve/reject pending, or print approved
-            OR (
-              (OLD.status = 'pending' AND NEW.status IN ('approved', 'rejected'))
-              OR (OLD.status = 'approved' AND NEW.status = 'printed')
-            )
-          )
-        )
-        -- Submitters can ONLY edit their own pending checks (status stays pending)
-        OR (
-          public.get_user_role() = 'submitter'
-          AND created_by = auth.uid()
-          AND OLD.status = 'pending'
-          AND NEW.status = 'pending'
-        )
+      -- Submitters can edit their own pending checks
+      OR (
+        public.get_user_role() = 'submitter'
+        AND created_by = auth.uid()
+        AND status = 'pending'
       )
     )
   );
@@ -450,7 +498,7 @@ CREATE POLICY "Checks: delete admin only"
   ON public.checks FOR DELETE
   USING (public.is_admin());
 
--- 17. RLS for audit log table
+-- 18. RLS for audit log table
 ALTER TABLE public.check_audit_log ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Audit log: select with check access"
@@ -469,7 +517,7 @@ CREATE POLICY "Audit log: insert system only"
   ON public.check_audit_log FOR INSERT
   WITH CHECK (false);  -- Only triggers can insert
 
--- 18. RLS for duplicate tracking table
+-- 19. RLS for duplicate tracking table
 ALTER TABLE public.check_duplicates ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Duplicates: select with account access"
@@ -485,16 +533,15 @@ CREATE POLICY "Duplicates: select with account access"
 
 -- No insert/update/delete policies - only triggers can modify
 
--- 19. Create a view for pending approval queue
+-- 20. Create a view for pending approval queue
 CREATE OR REPLACE VIEW public.approval_queue AS
 SELECT 
   c.id,
   c.check_number,
   c.date,
-  c.pay_to,
+  c.payee,
   c.amount,
   c.memo,
-  c.expense_category,
   c.business_unit,
   c.account_id,
   ba.name as account_name,
@@ -508,7 +555,7 @@ SELECT
   (
     SELECT COUNT(*) FROM public.checks dup
     WHERE dup.account_id = c.account_id
-    AND dup.pay_to = c.pay_to
+    AND dup.payee = c.payee
     AND dup.amount = c.amount
     AND dup.id != c.id
     AND dup.status IN ('pending', 'approved', 'printed')
@@ -527,7 +574,7 @@ ALTER VIEW public.approval_queue SET (security_barrier = true);
 -- Grant permissions on view
 GRANT SELECT ON public.approval_queue TO authenticated;
 
--- 20. Backfill created_by for existing checks
+-- 21. Backfill created_by for existing checks
 -- For existing checks, try to determine who created them
 -- If we can't determine, leave as NULL (treated as admin-created for permissions)
 DO $$
@@ -537,7 +584,7 @@ BEGIN
   RAISE NOTICE 'Existing checks: created_by left as NULL (treated as historical/admin-created)';
 END $$;
 
--- 21. Create stored procedure for bulk approval
+-- 22. Create stored procedure for bulk approval
 CREATE OR REPLACE FUNCTION public.bulk_approve_checks(
   p_check_ids UUID[]
 )
@@ -618,7 +665,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- Grant execute on function
 GRANT EXECUTE ON FUNCTION public.bulk_approve_checks TO authenticated;
 
--- 22. Secure new functions and tables from anon access
+-- 23. Secure new functions and tables from anon access
 -- Revoke all access from anon/public on new tables
 REVOKE ALL ON public.check_audit_log FROM anon;
 REVOKE ALL ON public.check_audit_log FROM public;
@@ -680,7 +727,11 @@ REVOKE EXECUTE ON FUNCTION public.bulk_approve_checks(UUID[]) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.bulk_approve_checks(UUID[]) FROM public;
 GRANT EXECUTE ON FUNCTION public.bulk_approve_checks(UUID[]) TO authenticated;
 
--- 23. Comments for documentation
+-- Revoke EXECUTE on status transition trigger from anon
+REVOKE EXECUTE ON FUNCTION public.trigger_enforce_status_transitions() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.trigger_enforce_status_transitions() FROM public;
+
+-- 24. Comments for documentation
 COMMENT ON TABLE public.check_audit_log IS 'Complete audit trail of all check operations';
 COMMENT ON TABLE public.check_duplicates IS 'Recent checks for duplicate detection (7 day window)';
 COMMENT ON COLUMN public.profiles.can_self_approve IS 'Admin override to allow user to approve their own checks (not used for approvers - they always can)';
