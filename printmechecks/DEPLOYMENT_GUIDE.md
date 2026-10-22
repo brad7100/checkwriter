@@ -122,6 +122,19 @@ cd printmechecks
 supabase functions deploy submit-check
 ```
 
+**⚠️ CRITICAL: Configure ALLOWED_ORIGIN**
+
+Before the function will accept requests, you MUST set the `ALLOWED_ORIGIN` environment variable:
+
+1. Find your frontend URL (see [FRONTEND_ORIGIN.md](./FRONTEND_ORIGIN.md))
+2. Go to Supabase Dashboard → Edge Functions → `submit-check` → Settings
+3. Add environment variable:
+   - **Name**: `ALLOWED_ORIGIN`
+   - **Value**: `https://your-frontend-domain.com` (your actual production URL)
+4. Redeploy: `supabase functions deploy submit-check`
+
+**Security**: If `ALLOWED_ORIGIN` is not set, the function **DENIES all cross-origin requests** (secure by default).
+
 **Verify deployment:**
 
 ```bash
