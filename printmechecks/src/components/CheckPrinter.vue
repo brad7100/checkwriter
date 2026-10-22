@@ -89,7 +89,36 @@
             </div>
         </div>
         <div class="check-data" style="position: absolute; top: 450px">
-            <button type="button" style="float: right;" class="btn btn-primary" @click="printCheck">Print (Ctrl + P)</button>
+            <div style="float: right; display: flex; gap: 10px;">
+                <!-- Submitters see "Submit for Approval" -->
+                <button 
+                    v-if="state.userProfile?.role === 'submitter' && (!check.status || check.status === 'pending')" 
+                    type="button" 
+                    class="btn btn-success" 
+                    @click="submitForApproval"
+                >
+                    <i class="bi bi-check-circle"></i> Submit for Approval
+                </button>
+                <!-- Approvers and admins can print directly (their workflow) -->
+                <button 
+                    v-if="state.userProfile?.role === 'approver' || state.isAdmin" 
+                    type="button" 
+                    class="btn btn-primary" 
+                    @click="printCheck"
+                    :disabled="check.status === 'printed' && !state.isAdmin"
+                >
+                    <i class="bi bi-printer"></i> {{ check.status === 'printed' ? 'Reprint' : 'Print' }} (Ctrl + P)
+                </button>
+                <!-- Show print button for approved checks -->
+                <button 
+                    v-if="state.userProfile?.role === 'submitter' && check.status === 'approved'" 
+                    type="button" 
+                    class="btn btn-primary" 
+                    @click="printCheck"
+                >
+                    <i class="bi bi-printer"></i> Print (Ctrl + P)
+                </button>
+            </div>
             
             <!-- Company and Account Selection - Two Column -->
             <div style="margin-bottom: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 8px;">
@@ -186,7 +215,33 @@
             </form>
             <div class="col-12" style="margin-top: 30px;">
                 <button type="button" class="btn btn-primary me-2" @click="saveToHistory">Save Check</button>
-                <button type="button" class="btn btn-outline-secondary" @click="printCheck">Print Check</button>
+                <!-- Submitters: Submit for Approval -->
+                <button 
+                    v-if="state.userProfile?.role === 'submitter' && (!check.status || check.status === 'pending')" 
+                    type="button" 
+                    class="btn btn-success me-2" 
+                    @click="submitForApproval"
+                >
+                    Submit for Approval
+                </button>
+                <!-- Approvers/Admins: Print directly -->
+                <button 
+                    v-if="state.userProfile?.role === 'approver' || state.isAdmin" 
+                    type="button" 
+                    class="btn btn-outline-secondary" 
+                    @click="printCheck"
+                >
+                    {{ check.status === 'printed' ? 'Reprint Check' : 'Print Check' }}
+                </button>
+                <!-- Submitters: Print approved checks -->
+                <button 
+                    v-if="state.userProfile?.role === 'submitter' && check.status === 'approved'" 
+                    type="button" 
+                    class="btn btn-outline-secondary" 
+                    @click="printCheck"
+                >
+                    Print Check
+                </button>
             </div>
         </div>
     </div>
@@ -198,6 +253,7 @@ import { ToWords } from 'to-words';
 import { ref, reactive, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { formatMoney } from '../utilities.ts'
 import { useAppStore } from '../stores/app.ts'
+import { supabase } from '../lib/supabase'
 import { useRouter } from 'vue-router'
 import CompanyAccountManager from './CompanyAccountManager.vue'
 
@@ -514,22 +570,117 @@ const toWords: (denom: number | string) => string = (denom) => {
     }
 }
 
-async function printCheck () {
-    // Always save the check first (create or update)
-    if (check.id) {
-        // Update existing check and mark as printed
-        check.isPrinted = true
-        check.printedDate = new Date().toISOString()
+async function submitForApproval() {
+    try {
+        // Check for duplicates before submission
+        const duplicates = await checkForDuplicates()
+        if (duplicates && duplicates.length > 0) {
+            const proceed = confirm(
+                `Warning: ${duplicates.length} similar check(s) found in the last 7 days.\n` +
+                `Do you want to submit anyway?`
+            )
+            if (!proceed) return
+        }
         
-        await state.updateCheck(check.id, {
-            ...check,
-            isPrinted: true,
-            printedDate: check.printedDate
+        // Get current user
+        const { data: { user } } = await supabase.auth.getUser()
+        
+        // Set status to pending and created_by
+        check.status = 'pending'
+        check.created_by = user?.id
+        check.isPrinted = false
+        
+        if (check.id) {
+            await state.updateCheck(check.id, {
+                ...check,
+                status: 'pending',
+                created_by: user?.id
+            })
+        } else {
+            const savedCheck = await state.saveCheck({...check})
+            check.id = savedCheck.id
+        }
+        
+        alert('Check submitted for approval!')
+        
+        // Refresh pending count
+        await state.loadPendingApprovalCount()
+    } catch (e) {
+        console.error('Failed to submit check:', e)
+        alert('Failed to submit check: ' + (e as Error).message)
+    }
+}
+
+async function checkForDuplicates() {
+    try {
+        const { data, error } = await supabase.rpc('check_for_duplicates', {
+            p_account_id: check.accountId,
+            p_payee: check.payTo,
+            p_amount: check.amount
         })
+        
+        if (error) throw error
+        return data
+    } catch (e) {
+        console.error('Failed to check duplicates:', e)
+        return null
+    }
+}
+
+async function printCheck () {
+    // Get current user and role
+    const { data: { user } } = await supabase.auth.getUser()
+    const userRole = state.userProfile?.role
+    
+    // Approvers and admins can print their own checks directly
+    // Others must have approved status
+    const isApproverOrAdmin = userRole === 'approver' || userRole === 'admin'
+    const isOwnCheck = !check.id || check.created_by === user?.id
+    
+    // Verify check is approved before printing (unless approver/admin printing their own)
+    if (!isApproverOrAdmin && check.status !== 'approved') {
+        alert('Only approved checks can be printed. Please submit for approval first.')
+        return
+    }
+    
+    // Handle reprint for already printed checks
+    if (check.status === 'printed') {
+        if (!state.isAdmin) {
+            alert('This check has already been printed. Contact an admin for reprints.')
+            return
+        }
+        
+        const confirmReprint = confirm('This check has already been printed. Are you sure you want to reprint?')
+        if (!confirmReprint) return
+    }
+    
+    // Update check status
+    if (check.id) {
+        const updateData: any = {
+            ...check,
+            status: 'printed',
+            isPrinted: true,
+            printedDate: new Date().toISOString()
+        }
+        
+        // Handle reprint tracking
+        if (check.status === 'printed') {
+            updateData.reprint_count = (check.reprint_count || 0) + 1
+            updateData.last_reprinted_by = user?.id
+            updateData.last_reprinted_at = new Date().toISOString()
+        }
+        
+        await state.updateCheck(check.id, updateData)
+        check.status = 'printed'
+        check.isPrinted = true
+        check.printedDate = updateData.printedDate
     } else {
         // Create new check and mark as printed
+        // Approvers can create and print directly
+        check.status = 'printed'
         check.isPrinted = true
         check.printedDate = new Date().toISOString()
+        check.created_by = user?.id
         
         const savedCheck = await state.saveCheck({...check})
         check.id = savedCheck.id
@@ -756,19 +907,34 @@ async function printCheck () {
 }
 
 async function saveToHistory () {
-    // Mark as unprinted (only when saving without printing)
-    check.isPrinted = false
-    check.printedDate = null
-    
-    // Save to Supabase
-    const savedCheck = await state.saveCheck({...check}) // Clone to avoid reference issues
-    
-    // Update the local check with the saved ID
-    if (!check.id) {
-        check.id = savedCheck.id
+    try {
+        // Get current user and role
+        const { data: { user } } = await supabase.auth.getUser()
+        const userRole = state.userProfile?.role
+        
+        // Approvers and admins can save their own checks as approved
+        // (no need for self-approval; they can print immediately)
+        // Submitters save as pending
+        const isApproverOrAdmin = userRole === 'approver' || userRole === 'admin'
+        
+        check.status = isApproverOrAdmin ? 'approved' : 'pending'
+        check.isPrinted = false
+        check.printedDate = null
+        check.created_by = user?.id
+        
+        // Save to Supabase
+        const savedCheck = await state.saveCheck({...check}) // Clone to avoid reference issues
+        
+        // Update the local check with the saved ID
+        if (!check.id) {
+            check.id = savedCheck.id
+        }
+        
+        alert('Check saved successfully!')
+    } catch (e) {
+        console.error('Failed to save check:', e)
+        alert('Failed to save check: ' + (e as Error).message)
     }
-    
-    alert('Check saved successfully!')
 }
 
 
@@ -868,7 +1034,11 @@ const check = reactive({
     mailToState: '',
     mailToZip: '',
     isPrinted: false,
-    printedDate: null
+    printedDate: null,
+    status: 'pending',
+    created_by: null,
+    reprint_count: 0,
+    is_legacy: false
 })
 
 // Initialize check data asynchronously

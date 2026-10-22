@@ -202,6 +202,12 @@ const createNewCheck = () => {
               <li class="nav-item">
                   <RouterLink to="/" class="nav-link" :class="{'active': $route.path == '/'}">Check Writer</RouterLink>
               </li>
+              <li class="nav-item" v-if="store.isAdmin || store.userProfile?.role === 'approver'">
+                  <RouterLink to="/approvals" class="nav-link" :class="{'active': $route.path == '/approvals'}">
+                      Approvals
+                      <span v-if="store.pendingApprovalCount > 0" class="badge bg-danger ms-1">{{ store.pendingApprovalCount }}</span>
+                  </RouterLink>
+              </li>
               <li class="nav-item">
                   <RouterLink to="/history" class="nav-link" :class="{'active': $route.path == '/history'}">History</RouterLink>
               </li>

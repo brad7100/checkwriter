@@ -46,6 +46,12 @@ const router = createRouter({
       name: 'layout-editor',
       component: () => import('../views/LayoutEditorView.vue'),
       meta: { requiresAuth: true }
+    },
+    {
+      path: '/approvals',
+      name: 'approvals',
+      component: () => import('../views/ApprovalQueueView.vue'),
+      meta: { requiresAuth: true, requiresApprover: true }
     }
   ]
 })
@@ -71,6 +77,16 @@ router.beforeEach((to, from, next) => {
       return
     }
     if (store.userProfile.role !== 'admin') {
+      next({ path: '/' })
+      return
+    }
+  }
+  if (to.meta.requiresApprover) {
+    if (!store.userProfile) {
+      next({ path: '/' })
+      return
+    }
+    if (!['admin', 'approver'].includes(store.userProfile.role)) {
       next({ path: '/' })
       return
     }
