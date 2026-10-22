@@ -16,31 +16,9 @@ ALTER TABLE public.profiles
 ALTER TABLE public.profiles 
   ADD COLUMN IF NOT EXISTS can_self_approve BOOLEAN DEFAULT false;
 
--- Backfill existing users with appropriate roles
--- This is idempotent - uses ON CONFLICT DO UPDATE
-DO $$
-BEGIN
-  -- Make brad@bradwilliamslaw.com an admin
-  UPDATE public.profiles 
-  SET role = 'admin', updated_at = NOW()
-  WHERE email = 'brad@bradwilliamslaw.com' 
-    AND role != 'admin';
-  
-  -- Make karen@bradwilliamslaw.com an approver
-  UPDATE public.profiles 
-  SET role = 'approver', updated_at = NOW()
-  WHERE email = 'karen@bradwilliamslaw.com' 
-    AND role != 'approver';
-  
-  -- Make all other non-admin users submitters
-  -- (users who are not brad or karen and not already admin)
-  UPDATE public.profiles 
-  SET role = 'submitter', updated_at = NOW()
-  WHERE email NOT IN ('brad@bradwilliamslaw.com', 'karen@bradwilliamslaw.com')
-    AND role NOT IN ('admin', 'submitter', 'approver');
-    
-  RAISE NOTICE 'User roles backfilled: brad=admin, karen=approver, others=submitter';
-END $$;
+-- Role assignment will be done as data after migrations
+-- Don't hardcode any users here
+-- Roles stay as defined in the profiles table from earlier migrations
 
 -- 2. Add check status and workflow fields to checks table
 -- Add is_legacy flag FIRST (needed for backfill logic below)
@@ -52,9 +30,9 @@ UPDATE public.checks
 SET is_legacy = true 
 WHERE is_legacy = false OR is_legacy IS NULL;
 
--- Use default 'printed' for existing checks to preserve their state
+-- Use default 'approved' for new checks (old app compatibility)
 ALTER TABLE public.checks 
-  ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'printed' 
+  ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'approved' 
     CHECK (status IN ('pending', 'approved', 'rejected', 'printed', 'void'));
 
 -- For existing checks, ensure status is set based on is_printed flag
@@ -255,20 +233,30 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 12. BEFORE INSERT trigger to coerce submitter inserts to 'pending'
+-- 12. BEFORE INSERT trigger to coerce submitter inserts and force created_by
 -- This ensures backward compatibility with the old frontend that sets status='printed'/'approved'
 CREATE OR REPLACE FUNCTION public.trigger_coerce_submitter_status()
 RETURNS TRIGGER AS $$
 DECLARE
   v_user_role TEXT;
+  v_auth_uid UUID;
 BEGIN
-  -- Get user role
-  SELECT role INTO v_user_role FROM public.profiles WHERE id = auth.uid();
+  v_auth_uid := auth.uid();
   
-  -- If submitter is trying to insert with status other than 'pending', force to 'pending'
-  -- This maintains backward compatibility with old frontend
-  IF v_user_role = 'submitter' AND NEW.status != 'pending' THEN
-    NEW.status := 'pending';
+  -- Force created_by for authenticated users
+  IF v_auth_uid IS NOT NULL THEN
+    NEW.created_by := v_auth_uid;
+  END IF;
+  
+  -- Get user role (only if authenticated)
+  IF v_auth_uid IS NOT NULL THEN
+    SELECT role INTO v_user_role FROM public.profiles WHERE id = v_auth_uid;
+    
+    -- If submitter is trying to insert with status other than 'pending', force to 'pending'
+    -- This maintains backward compatibility with old frontend
+    IF v_user_role = 'submitter' AND NEW.status != 'pending' THEN
+      NEW.status := 'pending';
+    END IF;
   END IF;
   
   RETURN NEW;
@@ -281,7 +269,7 @@ CREATE TRIGGER coerce_submitter_status_on_insert
   FOR EACH ROW
   EXECUTE FUNCTION public.trigger_coerce_submitter_status();
 
--- 13. BEFORE UPDATE trigger to enforce status transitions
+-- 13. BEFORE UPDATE trigger to enforce status transitions and sync is_printed
 -- This replaces the OLD/NEW logic in RLS which doesn't work
 CREATE OR REPLACE FUNCTION public.trigger_enforce_status_transitions()
 RETURNS TRIGGER AS $$
@@ -295,7 +283,28 @@ BEGIN
   v_is_admin := (v_user_role = 'admin');
   v_is_approver := (v_user_role IN ('approver', 'admin'));
   
-  -- If status hasn't changed, allow (editing other fields)
+  -- Stop submitters from printing through old app
+  IF v_user_role = 'submitter' AND NEW.is_printed = true AND OLD.is_printed = false THEN
+    RAISE EXCEPTION 'Submitters cannot print checks. Submit for approval.';
+  END IF;
+  
+  -- Only approvers and admins can print, and only approved checks
+  IF NEW.is_printed = true AND OLD.is_printed = false THEN
+    IF NOT v_is_approver THEN
+      RAISE EXCEPTION 'Only approvers and admins can print checks.';
+    END IF;
+    IF NEW.status NOT IN ('approved', 'printed') THEN
+      RAISE EXCEPTION 'Only approved checks can be printed.';
+    END IF;
+  END IF;
+  
+  -- Sync is_printed to status for old app compatibility
+  -- When is_printed flips to true and status isn't 'printed', set status to 'printed'
+  IF NEW.is_printed = true AND OLD.is_printed = false AND NEW.status != 'printed' THEN
+    NEW.status := 'printed';
+  END IF;
+  
+  -- If status hasn't changed (or was just synced), allow (editing other fields)
   IF OLD.status = NEW.status THEN
     RETURN NEW;
   END IF;
@@ -341,7 +350,6 @@ DROP TRIGGER IF EXISTS enforce_status_transitions ON public.checks;
 CREATE TRIGGER enforce_status_transitions
   BEFORE UPDATE ON public.checks
   FOR EACH ROW
-  WHEN (OLD.status IS DISTINCT FROM NEW.status)
   EXECUTE FUNCTION public.trigger_enforce_status_transitions();
 
 -- 14. Trigger to automatically log check creation
@@ -511,6 +519,27 @@ CREATE POLICY "Checks: update based on role and ownership"
         )
       )
       -- Submitters can edit their own pending checks
+      OR (
+        public.get_user_role() = 'submitter'
+        AND created_by = auth.uid()
+        AND status = 'pending'
+      )
+    )
+  )
+  WITH CHECK (
+    -- Approvers and admins with account access always pass
+    -- Submitters pass only for their own checks that stay pending
+    (
+      public.is_admin()
+      OR EXISTS (
+        SELECT 1 FROM public.account_users 
+        WHERE user_id = auth.uid() 
+        AND bank_account_id = checks.account_id
+      )
+    )
+    AND (
+      public.is_admin()
+      OR public.can_approve_checks()
       OR (
         public.get_user_role() = 'submitter'
         AND created_by = auth.uid()
@@ -743,6 +772,7 @@ GRANT EXECUTE ON FUNCTION public.log_check_audit(UUID, TEXT, JSONB, JSONB) TO au
 REVOKE EXECUTE ON FUNCTION public.check_for_duplicates(UUID, TEXT, TEXT) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.check_for_duplicates(UUID, TEXT, TEXT) FROM public;
 GRANT EXECUTE ON FUNCTION public.check_for_duplicates(UUID, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.check_for_duplicates(UUID, TEXT, TEXT) TO service_role;
 
 -- Trigger functions don't need explicit grants
 REVOKE EXECUTE ON FUNCTION public.trigger_log_check_creation() FROM anon;

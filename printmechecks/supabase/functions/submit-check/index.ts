@@ -5,15 +5,19 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 // CORS restricted to app origin via environment variable
-// SECURITY: If ALLOWED_ORIGIN is not set, DENY all cross-origin requests
+// SECURITY: If ALLOWED_ORIGIN is not set, OMIT the header (denies cross-origin)
 const allowedOrigin = Deno.env.get('ALLOWED_ORIGIN')
 if (!allowedOrigin) {
   console.error('ALLOWED_ORIGIN environment variable is not set. Cross-origin requests will be denied.')
 }
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': allowedOrigin || 'null',  // 'null' denies cross-origin
+const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-submitter-key',
+}
+
+// Only add CORS header if ALLOWED_ORIGIN is set
+if (allowedOrigin) {
+  corsHeaders['Access-Control-Allow-Origin'] = allowedOrigin
 }
 
 // Hash function for API keys (SHA-256)
