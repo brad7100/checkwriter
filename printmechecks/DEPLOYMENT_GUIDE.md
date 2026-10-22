@@ -11,18 +11,24 @@
 
 Run these migrations **in order** in the Supabase SQL Editor:
 
-### Migration 1: Security Lockdown (CRITICAL - MUST RUN FIRST)
+### Migration 1: Security Lockdown (MUST RUN FIRST)
 
 File: `supabase/migrations/003_security_lockdown.sql`
 
 **⚠️ CRITICAL: This migration MUST run before the workflow migration.**
 
-This migration fixes critical security vulnerabilities found in the live Supabase project:
-- Drops legacy "Allow all operations" policies that bypass all security
-- Revokes anon role over-privileges (including TRUNCATE)
-- Secures SECURITY DEFINER functions
-- Sets secure search_path on all functions
-- Creates security audit view
+**✅ NOTE: Emergency lockdown already applied to production (`emergency_lockdown_remove_anon_access`)**
+
+Production already has:
+- ✅ Legacy "Allow all operations" policies dropped
+- ✅ Anon role privileges revoked (ALL including TRUNCATE)
+- ✅ EXECUTE revoked on `is_admin()`, `clear_must_set_password()`, `handle_new_user()` from anon/public
+- ✅ TRUNCATE, TRIGGER, REFERENCES revoked from authenticated
+
+**This migration adds:**
+- 🆕 Secure search_path on all SECURITY DEFINER functions (NOT in emergency lockdown)
+- 🆕 Security audit view for monitoring
+- ✅ Idempotent - safe to re-run, completes the lockdown
 
 **To apply:**
 
@@ -31,7 +37,7 @@ This migration fixes critical security vulnerabilities found in the live Supabas
 3. Click **"New query"**
 4. Copy the entire contents of `003_security_lockdown.sql`
 5. Paste and click **"Run"**
-6. Verify no errors
+6. Verify no errors (should see notices about what was applied)
 
 **Verify security lockdown worked:**
 
@@ -42,37 +48,49 @@ WHERE status LIKE '%WARNING%' OR status LIKE '%CRITICAL%';
 
 Expected result: **0 rows** (all critical issues resolved)
 
-If you see WARNING or CRITICAL items, DO NOT PROCEED. Review the issues first.
+If you see WARNING or CRITICAL items, review them. Emergency lockdown should have resolved all CRITICAL items.
 
 ### Migration 2: Approval Workflow Core
 
 File: `supabase/migrations/004_approval_workflow.sql`
 
 This migration adds:
-- Extended role system (admin, user, submitter, approver)
 - Check status lifecycle (pending → approved → printed)
-- Audit trail table
+- Role-based permissions (submitter, approver, admin)
+- Complete audit trail logging
 - Duplicate detection
-- Separation of duties enforcement
+- Check number uniqueness
 - RLS policies for the new workflow
+- **Backfills existing data safely:**
+  - All 482 existing checks → status 'printed' (preserves current state)
+  - brad@bradwilliamslaw.com → admin role
+  - karen@bradwilliamslaw.com → approver role
+  - Other users → submitter role
+  - Existing checks get created_by = NULL (treated as historical)
+
+**Special workflow for Karen (approver):**
+- Karen can create checks and print them directly (no self-approval needed)
+- This preserves her current daily workflow
+- Separation of duties applies only to checks created by submitters
+- All actions logged in audit trail
 
 **To apply:**
 
-1. Open Supabase Dashboard
-2. Go to **SQL Editor**
-3. Click **"New query"**
-4. Copy the entire contents of `004_approval_workflow.sql`
-5. Paste and click **"Run"**
-6. Verify no errors
+1. Open a new query in SQL Editor
+2. Copy the contents of `004_approval_workflow.sql`
+3. Paste and click **"Run"**
+4. Verify no errors
+5. Check for success notices about role backfills
 
 ### Migration 3: Submitter API Keys
 
 File: `supabase/migrations/005_submitter_api_keys.sql`
 
 This migration adds:
-- API keys table for bot submissions
+- API keys table for automated check submission bots
 - Key generation function
 - Key revocation function
+- Idempotent - safe to re-run
 
 **To apply:**
 
@@ -80,6 +98,8 @@ This migration adds:
 2. Copy the contents of `005_submitter_api_keys.sql`
 3. Paste and click **"Run"**
 4. Verify no errors
+
+**Note:** All three migrations are idempotent and safe to re-run.
 
 ## Step 2: Deploy Edge Function
 
@@ -132,17 +152,22 @@ SET role = 'submitter'
 WHERE email = 'bot@example.com';
 ```
 
-### Configure Admin Override (Optional)
+### Karen's Workflow (No Configuration Needed)
 
-If an admin needs to approve their own checks:
+**✅ Karen (approver) can create and print checks directly without a second approval.**
 
-```sql
-UPDATE profiles 
-SET can_self_approve = true 
-WHERE email = 'admin@example.com';
-```
+This preserves her current daily workflow:
+1. Karen fills out a check
+2. Karen clicks Print
+3. Check is created with status='printed'
+4. Action logged in audit trail
 
-**Note:** This is logged in the audit trail.
+**Separation of duties applies only to submitter-created checks:**
+- Submitters create checks → status 'pending'
+- Karen approves them → status 'approved'
+- Karen prints them → status 'printed'
+
+No special configuration needed - this is handled by the RLS policies.
 
 ## Step 4: Create Bot API Key (If Needed)
 

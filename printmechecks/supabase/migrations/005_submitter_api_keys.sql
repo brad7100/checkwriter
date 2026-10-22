@@ -1,9 +1,10 @@
 -- ============================================================
 -- Submitter API Keys Table
 -- Stores API keys for automated check submission bots
+-- This migration is idempotent - safe to re-run
 -- ============================================================
 
--- 1. Create table for submitter API keys
+-- 1. Create table for submitter API keys (IF NOT EXISTS = idempotent)
 CREATE TABLE IF NOT EXISTS public.submitter_api_keys (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -45,7 +46,7 @@ CREATE POLICY "API Keys: admins can delete"
   ON public.submitter_api_keys FOR DELETE
   USING (public.is_admin());
 
--- 4. Function to generate a new API key
+-- 4. Function to generate a new API key (CREATE OR REPLACE = idempotent)
 CREATE OR REPLACE FUNCTION public.generate_submitter_api_key(
   p_user_id UUID,
   p_name TEXT,
@@ -109,7 +110,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 5. Function to revoke an API key
+-- 5. Function to revoke an API key (CREATE OR REPLACE = idempotent)
 CREATE OR REPLACE FUNCTION public.revoke_submitter_api_key(
   p_key_id UUID
 )

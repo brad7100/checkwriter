@@ -12,13 +12,59 @@ ALTER TABLE public.profiles
   CHECK (role IN ('admin', 'user', 'submitter', 'approver'));
 
 -- Add a column to track if user can self-approve (admin override)
+-- Not used for approvers - they can always approve/print their own checks
 ALTER TABLE public.profiles 
   ADD COLUMN IF NOT EXISTS can_self_approve BOOLEAN DEFAULT false;
 
+-- Backfill existing users with appropriate roles
+-- This is idempotent - uses ON CONFLICT DO UPDATE
+DO $$
+BEGIN
+  -- Make brad@bradwilliamslaw.com an admin
+  UPDATE public.profiles 
+  SET role = 'admin', updated_at = NOW()
+  WHERE email = 'brad@bradwilliamslaw.com' 
+    AND role != 'admin';
+  
+  -- Make karen@bradwilliamslaw.com an approver
+  UPDATE public.profiles 
+  SET role = 'approver', updated_at = NOW()
+  WHERE email = 'karen@bradwilliamslaw.com' 
+    AND role != 'approver';
+  
+  -- Make all other non-admin users submitters
+  -- (users who are not brad or karen and not already admin)
+  UPDATE public.profiles 
+  SET role = 'submitter', updated_at = NOW()
+  WHERE email NOT IN ('brad@bradwilliamslaw.com', 'karen@bradwilliamslaw.com')
+    AND role NOT IN ('admin', 'submitter', 'approver');
+    
+  RAISE NOTICE 'User roles backfilled: brad=admin, karen=approver, others=submitter';
+END $$;
+
 -- 2. Add check status and workflow fields to checks table
+-- Use default 'printed' for existing checks to preserve their state
 ALTER TABLE public.checks 
-  ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending' 
+  ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'printed' 
     CHECK (status IN ('pending', 'approved', 'rejected', 'printed', 'void'));
+
+-- For existing checks, ensure status is set based on is_printed flag
+DO $$
+BEGIN
+  -- Set status to 'printed' for all existing checks that were printed
+  UPDATE public.checks 
+  SET status = 'printed'
+  WHERE status IS NULL 
+    OR (status = 'printed' AND is_printed = true);
+  
+  -- Any existing checks that weren't printed should be 'approved' (rare edge case)
+  UPDATE public.checks 
+  SET status = 'approved'
+  WHERE is_printed = false 
+    AND status = 'printed';
+    
+  RAISE NOTICE 'Existing checks backfilled: printed checks marked as status=printed';
+END $$;
 
 ALTER TABLE public.checks 
   ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES auth.users(id);
@@ -279,25 +325,39 @@ CREATE POLICY "Checks: select with account access"
     )
   );
 
--- INSERT: Submitters and admins can create pending checks
-CREATE POLICY "Checks: insert as pending"
+-- INSERT: Submitters create pending checks; Approvers can create approved/printed checks
+CREATE POLICY "Checks: insert based on role"
   ON public.checks FOR INSERT
   WITH CHECK (
-    status = 'pending'
-    AND (
-      public.is_admin()
-      OR EXISTS (
-        SELECT 1 FROM public.profiles 
-        WHERE id = auth.uid() 
-        AND role IN ('submitter', 'approver', 'admin')
-      )
-    )
-    AND (
+    -- Must have account access (unless admin)
+    (
       public.is_admin()
       OR EXISTS (
         SELECT 1 FROM public.account_users 
         WHERE user_id = auth.uid() 
         AND bank_account_id = checks.account_id
+      )
+    )
+    AND (
+      -- Admins can create checks in any status
+      public.is_admin()
+      -- Approvers can create checks and mark as approved or printed (for their own checks)
+      OR (
+        EXISTS (
+          SELECT 1 FROM public.profiles 
+          WHERE id = auth.uid() 
+          AND role = 'approver'
+        )
+        AND status IN ('pending', 'approved', 'printed')
+      )
+      -- Submitters can only create pending checks
+      OR (
+        EXISTS (
+          SELECT 1 FROM public.profiles 
+          WHERE id = auth.uid() 
+          AND role = 'submitter'
+        )
+        AND status = 'pending'
       )
     )
   );
@@ -346,7 +406,7 @@ CREATE POLICY "Checks: update based on status and role"
       (OLD.status != 'printed' OR public.is_admin())
       -- Can't un-void checks
       AND (OLD.status != 'void' OR public.is_admin())
-      -- Pending can go to approved, rejected, or stay pending
+      -- Valid status transitions
       AND (
         (OLD.status = 'pending' AND NEW.status IN ('pending', 'approved', 'rejected'))
         OR (OLD.status = 'approved' AND NEW.status IN ('approved', 'printed', 'void'))
@@ -354,18 +414,33 @@ CREATE POLICY "Checks: update based on status and role"
         OR (OLD.status = 'rejected' AND NEW.status = 'rejected')
         OR (OLD.status = 'void' AND NEW.status = 'void')
       )
-      -- CRITICAL: Submitters can NEVER change status directly
-      -- Status changes to 'approved' or 'printed' MUST come through proper channels:
-      -- - Approved status can only be set by approvers/admins (via bulk_approve_checks or manual update)
-      -- - Printed status can only be set when status is already 'approved' or by admin
+      -- Role-based status change rules
       AND (
-        -- If user is a submitter (not approver/admin), they can only keep status as pending or set to pending
-        (
-          public.get_user_role() IN ('approver', 'admin')
-          OR (NEW.status = 'pending' AND (OLD.status IS NULL OR OLD.status = 'pending'))
+        -- Admins can change any status
+        public.is_admin()
+        -- Approvers can:
+        --   - Update their own checks to any valid status (for their workflow)
+        --   - Approve/reject others' pending checks
+        --   - Print approved checks
+        OR (
+          public.get_user_role() = 'approver'
+          AND (
+            -- Own checks: approver created it, can update freely within valid transitions
+            created_by = auth.uid()
+            -- Others' checks: can only approve/reject pending, or print approved
+            OR (
+              (OLD.status = 'pending' AND NEW.status IN ('approved', 'rejected'))
+              OR (OLD.status = 'approved' AND NEW.status = 'printed')
+            )
+          )
         )
-        -- Approvers can change pending -> approved or approved -> printed
-        -- But submitters cannot set approved or printed directly even on their own checks
+        -- Submitters can ONLY edit their own pending checks (status stays pending)
+        OR (
+          public.get_user_role() = 'submitter'
+          AND created_by = auth.uid()
+          AND OLD.status = 'pending'
+          AND NEW.status = 'pending'
+        )
       )
     )
   );
@@ -453,10 +528,14 @@ ALTER VIEW public.approval_queue SET (security_barrier = true);
 GRANT SELECT ON public.approval_queue TO authenticated;
 
 -- 20. Backfill created_by for existing checks
--- Set to null initially - admin should assign if needed
-UPDATE public.checks 
-SET created_by = NULL 
-WHERE created_by IS NULL;
+-- For existing checks, try to determine who created them
+-- If we can't determine, leave as NULL (treated as admin-created for permissions)
+DO $$
+BEGIN
+  -- Leave existing checks with created_by = NULL
+  -- This allows admins and approvers to manage them without restrictions
+  RAISE NOTICE 'Existing checks: created_by left as NULL (treated as historical/admin-created)';
+END $$;
 
 -- 21. Create stored procedure for bulk approval
 CREATE OR REPLACE FUNCTION public.bulk_approve_checks(
@@ -471,7 +550,7 @@ DECLARE
   v_check_id UUID;
   v_can_approve BOOLEAN;
   v_created_by UUID;
-  v_can_self_approve BOOLEAN;
+  v_user_role TEXT;
 BEGIN
   -- Check if user can approve
   v_can_approve := public.can_approve_checks();
@@ -482,8 +561,8 @@ BEGIN
     RETURN;
   END IF;
   
-  -- Check self-approve permission
-  SELECT can_self_approve INTO v_can_self_approve
+  -- Get user role
+  SELECT role INTO v_user_role
   FROM public.profiles
   WHERE id = auth.uid();
   
@@ -496,12 +575,9 @@ BEGIN
       FROM public.checks
       WHERE id = v_check_id;
       
-      -- Verify separation of duties
-      IF v_created_by = auth.uid() AND NOT v_can_self_approve THEN
-        RETURN QUERY
-        SELECT v_check_id, false, 'Cannot approve own check without admin override'::TEXT;
-        CONTINUE;
-      END IF;
+      -- Approvers can approve their own checks (no separation of duties restriction)
+      -- Admins can approve anything
+      -- This allows Karen to work normally
       
       -- Update check
       UPDATE public.checks
@@ -520,7 +596,7 @@ BEGIN
           NULL,
           jsonb_build_object(
             'self_approved', v_created_by = auth.uid(),
-            'admin_override', v_can_self_approve
+            'approver_role', v_user_role
           )
         );
         
@@ -607,7 +683,7 @@ GRANT EXECUTE ON FUNCTION public.bulk_approve_checks(UUID[]) TO authenticated;
 -- 23. Comments for documentation
 COMMENT ON TABLE public.check_audit_log IS 'Complete audit trail of all check operations';
 COMMENT ON TABLE public.check_duplicates IS 'Recent checks for duplicate detection (7 day window)';
-COMMENT ON COLUMN public.profiles.can_self_approve IS 'Admin override to allow user to approve their own checks';
+COMMENT ON COLUMN public.profiles.can_self_approve IS 'Admin override to allow user to approve their own checks (not used for approvers - they always can)';
 COMMENT ON COLUMN public.checks.status IS 'Check lifecycle: pending -> approved -> printed (or rejected/void)';
 COMMENT ON COLUMN public.checks.reprint_count IS 'Number of times check has been reprinted';
 COMMENT ON VIEW public.approval_queue IS 'Pending checks awaiting approval with duplicate detection';

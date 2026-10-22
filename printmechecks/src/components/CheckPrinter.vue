@@ -90,22 +90,33 @@
         </div>
         <div class="check-data" style="position: absolute; top: 450px">
             <div style="float: right; display: flex; gap: 10px;">
+                <!-- Submitters see "Submit for Approval" -->
                 <button 
-                    v-if="!check.status || check.status === 'pending'" 
+                    v-if="state.userProfile?.role === 'submitter' && (!check.status || check.status === 'pending')" 
                     type="button" 
                     class="btn btn-success" 
                     @click="submitForApproval"
                 >
                     <i class="bi bi-check-circle"></i> Submit for Approval
                 </button>
+                <!-- Approvers and admins can print directly (their workflow) -->
                 <button 
-                    v-if="check.status === 'approved' || state.isAdmin" 
+                    v-if="state.userProfile?.role === 'approver' || state.isAdmin" 
                     type="button" 
                     class="btn btn-primary" 
                     @click="printCheck"
                     :disabled="check.status === 'printed' && !state.isAdmin"
                 >
                     <i class="bi bi-printer"></i> {{ check.status === 'printed' ? 'Reprint' : 'Print' }} (Ctrl + P)
+                </button>
+                <!-- Show print button for approved checks -->
+                <button 
+                    v-if="state.userProfile?.role === 'submitter' && check.status === 'approved'" 
+                    type="button" 
+                    class="btn btn-primary" 
+                    @click="printCheck"
+                >
+                    <i class="bi bi-printer"></i> Print (Ctrl + P)
                 </button>
             </div>
             
@@ -204,21 +215,32 @@
             </form>
             <div class="col-12" style="margin-top: 30px;">
                 <button type="button" class="btn btn-primary me-2" @click="saveToHistory">Save Check</button>
+                <!-- Submitters: Submit for Approval -->
                 <button 
-                    v-if="!check.status || check.status === 'pending'" 
+                    v-if="state.userProfile?.role === 'submitter' && (!check.status || check.status === 'pending')" 
                     type="button" 
                     class="btn btn-success me-2" 
                     @click="submitForApproval"
                 >
                     Submit for Approval
                 </button>
+                <!-- Approvers/Admins: Print directly -->
                 <button 
-                    v-if="check.status === 'approved' || state.isAdmin" 
+                    v-if="state.userProfile?.role === 'approver' || state.isAdmin" 
                     type="button" 
                     class="btn btn-outline-secondary" 
                     @click="printCheck"
                 >
                     {{ check.status === 'printed' ? 'Reprint Check' : 'Print Check' }}
+                </button>
+                <!-- Submitters: Print approved checks -->
+                <button 
+                    v-if="state.userProfile?.role === 'submitter' && check.status === 'approved'" 
+                    type="button" 
+                    class="btn btn-outline-secondary" 
+                    @click="printCheck"
+                >
+                    Print Check
                 </button>
             </div>
         </div>
@@ -606,8 +628,17 @@ async function checkForDuplicates() {
 }
 
 async function printCheck () {
-    // Verify check is approved before printing (unless admin)
-    if (!state.isAdmin && check.status !== 'approved') {
+    // Get current user and role
+    const { data: { user } } = await supabase.auth.getUser()
+    const userRole = state.userProfile?.role
+    
+    // Approvers and admins can print their own checks directly
+    // Others must have approved status
+    const isApproverOrAdmin = userRole === 'approver' || userRole === 'admin'
+    const isOwnCheck = !check.id || check.created_by === user?.id
+    
+    // Verify check is approved before printing (unless approver/admin printing their own)
+    if (!isApproverOrAdmin && check.status !== 'approved') {
         alert('Only approved checks can be printed. Please submit for approval first.')
         return
     }
@@ -622,9 +653,6 @@ async function printCheck () {
         const confirmReprint = confirm('This check has already been printed. Are you sure you want to reprint?')
         if (!confirmReprint) return
     }
-    
-    // Get current user
-    const { data: { user } } = await supabase.auth.getUser()
     
     // Update check status
     if (check.id) {
@@ -647,7 +675,8 @@ async function printCheck () {
         check.isPrinted = true
         check.printedDate = updateData.printedDate
     } else {
-        // Create new check and mark as printed (admin bypass)
+        // Create new check and mark as printed
+        // Approvers can create and print directly
         check.status = 'printed'
         check.isPrinted = true
         check.printedDate = new Date().toISOString()

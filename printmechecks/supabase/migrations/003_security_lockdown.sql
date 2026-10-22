@@ -2,11 +2,18 @@
 -- Security Lockdown - CRITICAL
 -- Fixes legacy allow-all policies and anon role over-privileges
 -- MUST RUN BEFORE 004_approval_workflow.sql
+--
+-- NOTE: Emergency lockdown (emergency_lockdown_remove_anon_access) 
+-- already applied to production. This migration is idempotent 
+-- and adds search_path fixes and additional hardening.
 -- ============================================================
 
 -- ====================
 -- PART 1: DROP DANGEROUS LEGACY POLICIES
 -- ====================
+
+-- NOTE: In production, these were already dropped by emergency_lockdown_remove_anon_access
+-- Using IF EXISTS makes this idempotent - safe to run on any environment
 
 -- These policies allow anyone with the anon key to bypass all security
 DROP POLICY IF EXISTS "Allow all operations on bank_accounts" ON public.bank_accounts;
@@ -197,6 +204,9 @@ END $$;
 -- PART 3: REVOKE ANON PRIVILEGES
 -- ====================
 
+-- NOTE: In production, these were already revoked by emergency_lockdown_remove_anon_access
+-- Safe to re-run - REVOKE is idempotent
+
 -- Anon should have NO access to these tables
 -- Only authenticated users should be able to do anything
 
@@ -218,7 +228,16 @@ REVOKE ALL ON public.profiles FROM public;
 REVOKE ALL ON public.account_users FROM anon;
 REVOKE ALL ON public.account_users FROM public;
 
--- Grant only what authenticated users need (SELECT via RLS policies)
+-- Emergency lockdown also revoked TRUNCATE, TRIGGER, and REFERENCES from authenticated
+-- We keep that restriction here for consistency
+REVOKE TRUNCATE, TRIGGER, REFERENCES ON public.companies FROM authenticated;
+REVOKE TRUNCATE, TRIGGER, REFERENCES ON public.bank_accounts FROM authenticated;
+REVOKE TRUNCATE, TRIGGER, REFERENCES ON public.checks FROM authenticated;
+REVOKE TRUNCATE, TRIGGER, REFERENCES ON public.custom_layouts FROM authenticated;
+REVOKE TRUNCATE, TRIGGER, REFERENCES ON public.profiles FROM authenticated;
+REVOKE TRUNCATE, TRIGGER, REFERENCES ON public.account_users FROM authenticated;
+
+-- Grant only what authenticated users need (SELECT/INSERT/UPDATE/DELETE via RLS policies)
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.companies TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.bank_accounts TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.checks TO authenticated;
@@ -233,20 +252,30 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated;
 -- PART 4: SECURE FUNCTIONS
 -- ====================
 
--- Revoke EXECUTE from anon on SECURITY DEFINER functions
+-- NOTE: In production, emergency_lockdown_remove_anon_access already:
+-- - Revoked EXECUTE on is_admin() and clear_must_set_password() from PUBLIC and anon
+-- - Revoked EXECUTE on handle_new_user() from PUBLIC, anon, AND authenticated
+-- - Did NOT set search_path (added here)
+
+-- Revoke EXECUTE from anon/public on SECURITY DEFINER functions
+-- Safe to re-run - REVOKE is idempotent
 REVOKE EXECUTE ON FUNCTION public.is_admin() FROM anon;
 REVOKE EXECUTE ON FUNCTION public.is_admin() FROM public;
 GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
 
 REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM anon;
 REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM public;
+REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM authenticated;
 -- handle_new_user is a trigger function, doesn't need explicit grant
+-- Emergency lockdown revoked from authenticated too, we keep that
 
 REVOKE EXECUTE ON FUNCTION public.update_updated_at_column() FROM anon;
 REVOKE EXECUTE ON FUNCTION public.update_updated_at_column() FROM public;
 -- update_updated_at_column is a trigger function, doesn't need explicit grant
 
--- Set secure search_path on SECURITY DEFINER functions
+-- NEW: Set secure search_path on SECURITY DEFINER functions
+-- This was NOT done by emergency lockdown and is NEW protection
+-- Prevents search_path injection attacks
 ALTER FUNCTION public.is_admin() SET search_path = public, pg_temp;
 ALTER FUNCTION public.handle_new_user() SET search_path = public, pg_temp;
 ALTER FUNCTION public.update_updated_at_column() SET search_path = public, pg_temp;
@@ -259,9 +288,11 @@ BEGIN
     WHERE proname = 'clear_must_set_password' 
     AND pronamespace = 'public'::regnamespace
   ) THEN
+    -- Emergency lockdown already revoked from PUBLIC and anon, keep authenticated
     EXECUTE 'REVOKE EXECUTE ON FUNCTION public.clear_must_set_password() FROM anon';
     EXECUTE 'REVOKE EXECUTE ON FUNCTION public.clear_must_set_password() FROM public';
     EXECUTE 'GRANT EXECUTE ON FUNCTION public.clear_must_set_password() TO authenticated';
+    -- NEW: Set search_path (not done by emergency lockdown)
     EXECUTE 'ALTER FUNCTION public.clear_must_set_password() SET search_path = public, pg_temp';
   END IF;
 END $$;
@@ -364,7 +395,18 @@ COMMENT ON VIEW public.security_audit IS 'Security posture monitoring view - che
 -- Log completion
 DO $$
 BEGIN
-  RAISE NOTICE 'Security lockdown migration completed';
-  RAISE NOTICE 'Run: SELECT * FROM security_audit WHERE status LIKE ''%%WARNING%%'' OR status LIKE ''%%CRITICAL%%'';';
-  RAISE NOTICE 'Expected result: No rows (all critical issues resolved)';
+  RAISE NOTICE '=============================================================';
+  RAISE NOTICE 'Security lockdown migration 003 completed';
+  RAISE NOTICE '';
+  RAISE NOTICE 'NOTE: Production already has emergency_lockdown_remove_anon_access applied';
+  RAISE NOTICE 'This migration adds:';
+  RAISE NOTICE '  - search_path fixes on SECURITY DEFINER functions (NEW)';
+  RAISE NOTICE '  - TRUNCATE/TRIGGER/REFERENCES restrictions (confirmed)';
+  RAISE NOTICE '  - Proper policies verification (idempotent)';
+  RAISE NOTICE '  - Security audit view (NEW)';
+  RAISE NOTICE '';
+  RAISE NOTICE 'Verification:';
+  RAISE NOTICE '  Run: SELECT * FROM security_audit WHERE status LIKE ''%%WARNING%%'' OR status LIKE ''%%CRITICAL%%'';';
+  RAISE NOTICE '  Expected result: 0 rows (all critical issues resolved)';
+  RAISE NOTICE '=============================================================';
 END $$;
