@@ -138,10 +138,10 @@ GRANT EXECUTE ON FUNCTION public.generate_submitter_api_key TO authenticated;
 GRANT EXECUTE ON FUNCTION public.revoke_submitter_api_key TO authenticated;
 
 -- 7. Secure functions and table from anon access
--- Revoke all access from anon/public
+-- Revoke all access from anon/public and grant specific permissions to authenticated
 REVOKE ALL ON public.submitter_api_keys FROM anon;
-REVOKE ALL ON public.submitter_api_keys FROM public;
-GRANT SELECT, INSERT, UPDATE ON public.submitter_api_keys TO authenticated;
+REVOKE ALL ON public.submitter_api_keys FROM authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.submitter_api_keys TO authenticated;
 
 -- Set secure search_path on SECURITY DEFINER functions
 ALTER FUNCTION public.generate_submitter_api_key(UUID, TEXT, INTEGER) SET search_path = public, pg_temp;

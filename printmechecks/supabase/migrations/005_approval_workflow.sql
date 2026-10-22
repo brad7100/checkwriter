@@ -616,14 +616,14 @@ WITH (security_invoker = true) AS
 SELECT 
   c.id,
   c.check_number,
-  c.check_date,
+  c.date,
   c.pay_to,
   c.amount,
   c.memo,
   c.business_unit,
   c.account_id,
-  ba.account_name,
-  ba.routing_number as bank_name,
+  ba.name as account_name,
+  ba.bank_name,
   co.name as company_name,
   c.created_by,
   p.email as created_by_email,
@@ -759,13 +759,18 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 GRANT EXECUTE ON FUNCTION public.bulk_approve_checks TO authenticated;
 
 -- 24. Secure new functions and tables from anon access
--- Revoke all access from anon/public on new tables
+-- Revoke all access from anon/public on new tables and views
+REVOKE ALL ON public.approval_queue FROM anon, public, authenticated;
+GRANT SELECT ON public.approval_queue TO authenticated;
+
 REVOKE ALL ON public.check_audit_log FROM anon;
 REVOKE ALL ON public.check_audit_log FROM public;
+REVOKE ALL ON public.check_audit_log FROM authenticated;
 GRANT SELECT ON public.check_audit_log TO authenticated;
 
 REVOKE ALL ON public.check_duplicates FROM anon;
 REVOKE ALL ON public.check_duplicates FROM public;
+REVOKE ALL ON public.check_duplicates FROM authenticated;
 GRANT SELECT ON public.check_duplicates TO authenticated;
 
 -- Set secure search_path on all SECURITY DEFINER functions
@@ -804,30 +809,36 @@ REVOKE EXECUTE ON FUNCTION public.check_for_duplicates(UUID, TEXT, TEXT) FROM pu
 GRANT EXECUTE ON FUNCTION public.check_for_duplicates(UUID, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.check_for_duplicates(UUID, TEXT, TEXT) TO service_role;
 
--- Trigger functions don't need explicit grants
+-- Trigger functions should NOT be executable by users directly
+REVOKE EXECUTE ON FUNCTION public.trigger_coerce_submitter_status() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.trigger_coerce_submitter_status() FROM public;
+REVOKE EXECUTE ON FUNCTION public.trigger_coerce_submitter_status() FROM authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.trigger_enforce_status_transitions() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.trigger_enforce_status_transitions() FROM public;
+REVOKE EXECUTE ON FUNCTION public.trigger_enforce_status_transitions() FROM authenticated;
+
 REVOKE EXECUTE ON FUNCTION public.trigger_log_check_creation() FROM anon;
 REVOKE EXECUTE ON FUNCTION public.trigger_log_check_creation() FROM public;
+REVOKE EXECUTE ON FUNCTION public.trigger_log_check_creation() FROM authenticated;
 
 REVOKE EXECUTE ON FUNCTION public.trigger_log_check_update() FROM anon;
 REVOKE EXECUTE ON FUNCTION public.trigger_log_check_update() FROM public;
+REVOKE EXECUTE ON FUNCTION public.trigger_log_check_update() FROM authenticated;
 
 REVOKE EXECUTE ON FUNCTION public.trigger_track_duplicate() FROM anon;
 REVOKE EXECUTE ON FUNCTION public.trigger_track_duplicate() FROM public;
+REVOKE EXECUTE ON FUNCTION public.trigger_track_duplicate() FROM authenticated;
 
 REVOKE EXECUTE ON FUNCTION public.cleanup_old_duplicate_tracking() FROM anon;
 REVOKE EXECUTE ON FUNCTION public.cleanup_old_duplicate_tracking() FROM public;
-GRANT EXECUTE ON FUNCTION public.cleanup_old_duplicate_tracking() TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.cleanup_old_duplicate_tracking() FROM authenticated;
 
 -- bulk_approve_checks should only be callable by authenticated users
 REVOKE EXECUTE ON FUNCTION public.bulk_approve_checks(UUID[]) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.bulk_approve_checks(UUID[]) FROM public;
 GRANT EXECUTE ON FUNCTION public.bulk_approve_checks(UUID[]) TO authenticated;
 
--- Revoke EXECUTE on status triggers from anon
-REVOKE EXECUTE ON FUNCTION public.trigger_coerce_submitter_status() FROM anon;
-REVOKE EXECUTE ON FUNCTION public.trigger_coerce_submitter_status() FROM public;
-REVOKE EXECUTE ON FUNCTION public.trigger_enforce_status_transitions() FROM anon;
-REVOKE EXECUTE ON FUNCTION public.trigger_enforce_status_transitions() FROM public;
 
 -- 25. Comments for documentation
 COMMENT ON TABLE public.check_audit_log IS 'Complete audit trail of all check operations';

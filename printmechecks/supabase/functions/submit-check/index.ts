@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
     if (keyError || !keyData) {
       return new Response(
         JSON.stringify({ error: 'Invalid or inactive API key' }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 

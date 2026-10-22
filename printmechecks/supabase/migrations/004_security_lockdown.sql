@@ -437,6 +437,18 @@ WHERE n.nspname = 'public'
 GRANT SELECT ON public.security_audit TO authenticated;
 
 -- ====================
+-- ADDITIONAL HARDENING FOR SECURITY_AUDIT VIEW
+-- ====================
+
+-- Revoke all default permissions and grant only SELECT to authenticated
+REVOKE ALL ON public.security_audit FROM anon;
+REVOKE ALL ON public.security_audit FROM public;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON public.security_audit FROM authenticated;
+
+-- Make security_audit view respect RLS of underlying tables
+ALTER VIEW public.security_audit SET (security_invoker = true);
+
+-- ====================
 -- COMMENTS
 -- ====================
 
