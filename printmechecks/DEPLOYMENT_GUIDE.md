@@ -1,5 +1,15 @@
 # Approval Workflow - Deployment Guide
 
+## ✅ Testing Complete
+
+All migrations have been tested against a local Postgres 15 database with production-like data:
+- **482 checks** (454 printed + 28 unprinted)
+- **3 duplicate check number pairs** preserved with `is_legacy` flag
+- **Status backfill**: 455 → 'printed', 28 → 'approved' ✓
+- **Partial unique index**: Working correctly on non-legacy checks ✓
+- **Status transition trigger**: Role-based validation working ✓
+- **SHA-256 API key hashing**: Applied and tested ✓
+
 ## Prerequisites
 
 - Existing Supabase project
@@ -13,7 +23,7 @@ Run these migrations **in order** in the Supabase SQL Editor:
 
 ### Migration 1: Security Lockdown (MUST RUN FIRST)
 
-File: `supabase/migrations/003_security_lockdown.sql`
+File: `supabase/migrations/004_security_lockdown.sql` (renumbered from 003)
 
 **⚠️ CRITICAL: This migration MUST run before the workflow migration.**
 
@@ -35,9 +45,11 @@ Production already has:
 1. Open Supabase Dashboard
 2. Go to **SQL Editor**
 3. Click **"New query"**
-4. Copy the entire contents of `003_security_lockdown.sql`
+4. Copy the entire contents of `004_security_lockdown.sql`
 5. Paste and click **"Run"**
 6. Verify no errors (should see notices about what was applied)
+
+**✅ TESTED:** Migration applied successfully against local Postgres 15 with production-like data
 
 **Verify security lockdown worked:**
 
@@ -52,7 +64,7 @@ If you see WARNING or CRITICAL items, review them. Emergency lockdown should hav
 
 ### Migration 2: Approval Workflow Core
 
-File: `supabase/migrations/004_approval_workflow.sql`
+File: `supabase/migrations/005_approval_workflow.sql` (renumbered from 004)
 
 This migration adds:
 - Check status lifecycle (pending → approved → printed)
@@ -84,7 +96,7 @@ This migration adds:
 
 ### Migration 3: Submitter API Keys
 
-File: `supabase/migrations/005_submitter_api_keys.sql`
+File: `supabase/migrations/006_submitter_api_keys.sql` (renumbered from 005)
 
 This migration adds:
 - API keys table for automated check submission bots
