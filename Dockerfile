@@ -22,8 +22,18 @@ RUN npm install -g serve
 # Remove dev dependencies to reduce image size
 RUN npm prune --production
 
+# Create non-root user for running the application
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001
+
+# Change ownership of app directory
+RUN chown -R nodejs:nodejs /app
+
+# Switch to non-root user
+USER nodejs
+
 # Expose port
 EXPOSE 3000
 
-# Start the application using serve
-CMD ["sh", "-c", "serve -s dist -l ${PORT:-3000}"]
+# Start the application using serve with security headers config
+CMD ["sh", "-c", "serve -s dist -l ${PORT:-3000} --no-clipboard"]
