@@ -36,18 +36,18 @@ ALTER TABLE public.checks
     CHECK (status IN ('pending', 'approved', 'rejected', 'printed', 'void'));
 
 -- For existing checks, ensure status is set based on is_printed flag
--- 454 printed checks → 'printed'
--- 28 unprinted checks → 'approved' (ready to print, preserves workflow)
+-- IMPORTANT: The column was just added with DEFAULT 'approved', so ALL existing rows now have status='approved'
+-- We must UPDATE without checking status column to correctly backfill
+-- Expected: 454 printed checks → 'printed', 28 unprinted checks → 'approved'
 DO $$
 DECLARE
   v_printed_count INT;
   v_approved_count INT;
 BEGIN
-  -- Set status to 'printed' for existing printed checks
+  -- Set status to 'printed' for existing printed checks (don't check status column!)
   UPDATE public.checks 
   SET status = 'printed'
-  WHERE is_printed = true 
-    AND (status IS NULL OR status = 'printed');
+  WHERE is_printed = true;
   
   GET DIAGNOSTICS v_printed_count = ROW_COUNT;
   
@@ -55,8 +55,7 @@ BEGIN
   -- These are ready to print, same workflow as today
   UPDATE public.checks 
   SET status = 'approved'
-  WHERE is_printed = false 
-    AND is_legacy = true;
+  WHERE is_printed = false OR is_printed IS NULL;
   
   GET DIAGNOSTICS v_approved_count = ROW_COUNT;
   
@@ -240,6 +239,7 @@ RETURNS TRIGGER AS $$
 DECLARE
   v_user_role TEXT;
   v_auth_uid UUID;
+  v_is_approver BOOLEAN;
 BEGIN
   v_auth_uid := auth.uid();
   
@@ -251,11 +251,22 @@ BEGIN
   -- Get user role (only if authenticated)
   IF v_auth_uid IS NOT NULL THEN
     SELECT role INTO v_user_role FROM public.profiles WHERE id = v_auth_uid;
+    v_is_approver := (v_user_role IN ('approver', 'admin'));
     
-    -- If submitter is trying to insert with status other than 'pending', force to 'pending'
-    -- This maintains backward compatibility with old frontend
-    IF v_user_role = 'submitter' AND NEW.status != 'pending' THEN
-      NEW.status := 'pending';
+    -- Submitters: coerce to pending and prevent printing
+    IF v_user_role = 'submitter' THEN
+      -- Force status to pending
+      IF NEW.status != 'pending' THEN
+        NEW.status := 'pending';
+      END IF;
+      -- Force is_printed to false (old app print path blocked for submitters)
+      NEW.is_printed := false;
+      NEW.printed_date := NULL;
+    END IF;
+    
+    -- Approvers/admins: if inserting with is_printed=true, sync status to 'printed'
+    IF v_is_approver AND NEW.is_printed = true THEN
+      NEW.status := 'printed';
     END IF;
   END IF;
   
@@ -599,18 +610,20 @@ CREATE POLICY "Duplicates: select with account access"
 -- No insert/update/delete policies - only triggers can modify
 
 -- 21. Create a view for pending approval queue
-CREATE OR REPLACE VIEW public.approval_queue AS
+-- WITH (security_invoker = true) ensures RLS policies apply to the view
+CREATE OR REPLACE VIEW public.approval_queue
+WITH (security_invoker = true) AS
 SELECT 
   c.id,
   c.check_number,
-  c.date,
+  c.check_date,
   c.pay_to,
   c.amount,
   c.memo,
   c.business_unit,
   c.account_id,
-  ba.name as account_name,
-  ba.bank_name,
+  ba.account_name,
+  ba.routing_number as bank_name,
   co.name as company_name,
   c.created_by,
   p.email as created_by_email,
@@ -682,10 +695,25 @@ BEGIN
   FOREACH v_check_id IN ARRAY p_check_ids
   LOOP
     BEGIN
-      -- Get check creator
+      -- Get check creator and verify account access
       SELECT created_by INTO v_created_by
       FROM public.checks
-      WHERE id = v_check_id;
+      WHERE id = v_check_id
+      -- Caller must have access to this check's account OR be admin
+      AND (
+        public.is_admin()
+        OR account_id IN (
+          SELECT bank_account_id 
+          FROM public.account_users 
+          WHERE user_id = auth.uid()
+        )
+      );
+      
+      IF v_created_by IS NULL THEN
+        RETURN QUERY
+        SELECT v_check_id, false, 'Check not found or no access to account'::TEXT;
+        CONTINUE;
+      END IF;
       
       -- Approvers can approve their own checks (no separation of duties restriction)
       -- Admins can approve anything
@@ -765,9 +793,11 @@ REVOKE EXECUTE ON FUNCTION public.created_check(UUID) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.created_check(UUID) FROM public;
 GRANT EXECUTE ON FUNCTION public.created_check(UUID) TO authenticated;
 
+-- Audit log writer should ONLY be called by triggers (SECURITY DEFINER)
+-- Revoke from everyone to prevent forged audit entries
 REVOKE EXECUTE ON FUNCTION public.log_check_audit(UUID, TEXT, JSONB, JSONB) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.log_check_audit(UUID, TEXT, JSONB, JSONB) FROM public;
-GRANT EXECUTE ON FUNCTION public.log_check_audit(UUID, TEXT, JSONB, JSONB) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.log_check_audit(UUID, TEXT, JSONB, JSONB) FROM authenticated;
 
 REVOKE EXECUTE ON FUNCTION public.check_for_duplicates(UUID, TEXT, TEXT) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.check_for_duplicates(UUID, TEXT, TEXT) FROM public;
