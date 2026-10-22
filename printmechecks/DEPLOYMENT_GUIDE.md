@@ -11,7 +11,40 @@
 
 Run these migrations **in order** in the Supabase SQL Editor:
 
-### Migration 1: Approval Workflow Core
+### Migration 1: Security Lockdown (CRITICAL - MUST RUN FIRST)
+
+File: `supabase/migrations/003_security_lockdown.sql`
+
+**⚠️ CRITICAL: This migration MUST run before the workflow migration.**
+
+This migration fixes critical security vulnerabilities found in the live Supabase project:
+- Drops legacy "Allow all operations" policies that bypass all security
+- Revokes anon role over-privileges (including TRUNCATE)
+- Secures SECURITY DEFINER functions
+- Sets secure search_path on all functions
+- Creates security audit view
+
+**To apply:**
+
+1. Open Supabase Dashboard
+2. Go to **SQL Editor**
+3. Click **"New query"**
+4. Copy the entire contents of `003_security_lockdown.sql`
+5. Paste and click **"Run"**
+6. Verify no errors
+
+**Verify security lockdown worked:**
+
+```sql
+SELECT * FROM security_audit 
+WHERE status LIKE '%WARNING%' OR status LIKE '%CRITICAL%';
+```
+
+Expected result: **0 rows** (all critical issues resolved)
+
+If you see WARNING or CRITICAL items, DO NOT PROCEED. Review the issues first.
+
+### Migration 2: Approval Workflow Core
 
 File: `supabase/migrations/004_approval_workflow.sql`
 
@@ -32,7 +65,7 @@ This migration adds:
 5. Paste and click **"Run"**
 6. Verify no errors
 
-### Migration 2: Submitter API Keys
+### Migration 3: Submitter API Keys
 
 File: `supabase/migrations/005_submitter_api_keys.sql`
 
@@ -144,10 +177,25 @@ export CHECKWRITER_API_KEY="sbmt_ABC123xyz..."
 
 ## Step 5: Verify Installation
 
+### Test 0: Verify Security Lockdown
+
+```sql
+-- Should return 0 rows (no warnings or critical issues)
+SELECT * FROM security_audit 
+WHERE status LIKE '%WARNING%' OR status LIKE '%CRITICAL%';
+
+-- Should show all policies as authenticated-only
+SELECT * FROM security_audit 
+WHERE object_type = 'privilege'
+  AND grantee = 'anon'
+  AND status LIKE '%CRITICAL%';
+-- Expected: 0 rows (anon has no dangerous privileges)
+```
+
 ### Test 1: Check Tables Created
 
 ```sql
--- Should return data
+-- Should return data (or empty but not error)
 SELECT * FROM check_audit_log LIMIT 1;
 SELECT * FROM check_duplicates LIMIT 1;
 SELECT * FROM submitter_api_keys LIMIT 1;
@@ -578,14 +626,15 @@ For deployment issues:
 
 **Deployment Steps:**
 
-1. Apply migration 004 (core workflow)
-2. Apply migration 005 (API keys)
-3. Deploy edge function
-4. Set user roles
-5. Generate bot API keys (if needed)
-6. Deploy frontend
-7. Train users
-8. Monitor usage
+1. **CRITICAL**: Apply migration 003 (security lockdown) - Verify with security_audit view
+2. Apply migration 004 (core workflow)
+3. Apply migration 005 (API keys)
+4. Deploy edge function
+5. Set user roles
+6. Generate bot API keys (if needed)
+7. Deploy frontend
+8. Train users
+9. Monitor usage
 
 **Estimated Time:** 30-60 minutes
 

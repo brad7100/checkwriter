@@ -37,6 +37,15 @@ A complete check approval workflow that requires checks to be submitted, approve
 
 ### 1. Apply Database Migrations
 In Supabase SQL Editor, run these **in order**:
+
+**⚠️ CRITICAL FIRST STEP:**
+- `supabase/migrations/003_security_lockdown.sql` - **MUST RUN FIRST**
+  - Fixes critical security vulnerabilities in existing database
+  - Drops allow-all policies
+  - Revokes anon over-privileges
+  - Verify with: `SELECT * FROM security_audit WHERE status LIKE '%CRITICAL%';` (should return 0 rows)
+
+Then:
 - `supabase/migrations/004_approval_workflow.sql`
 - `supabase/migrations/005_submitter_api_keys.sql`
 
@@ -80,16 +89,38 @@ npm run build
 
 ## Documentation
 
+- **`TESTING_DISCLOSURE.md`** - **READ THIS FIRST** - Testing methodology and required validation
 - **`APPROVAL_WORKFLOW_GUIDE.md`** - Complete user guide for Karen, submitters, and bots
 - **`DEPLOYMENT_GUIDE.md`** - Detailed deployment steps and troubleshooting
 - **This file** - Quick reference
 
+## Important Notes
+
+⚠️ **This code has NOT been tested against a live Supabase instance.**
+
+See `TESTING_DISCLOSURE.md` for:
+- What testing was actually performed (code review only)
+- Critical security issues found and fixed
+- Required testing before production
+- Honest assessment of readiness
+
+**DO NOT deploy to production without testing on a test Supabase instance first.**
+
 ## Security
 
+### Critical Fixes Applied
+Migration 003 fixes vulnerabilities found in production audit:
+- ❌ **REMOVED**: Allow-all policies that bypassed security
+- ❌ **REMOVED**: Anon role TRUNCATE and write privileges
+- ✅ **SECURED**: All SECURITY DEFINER functions
+- ✅ **ENFORCED**: Authenticated-only access
+
+### Workflow Security
 All permissions enforced at database level with RLS:
 - Submitters can only create pending checks
 - Approvers can approve/reject/edit checks
 - No one can approve their own checks (unless admin override)
+- Status changes require proper roles (can't bypass to 'approved')
 - All operations logged in audit trail
 
 ## Support

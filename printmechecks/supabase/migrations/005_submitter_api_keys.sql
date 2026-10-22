@@ -132,7 +132,26 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 GRANT EXECUTE ON FUNCTION public.generate_submitter_api_key TO authenticated;
 GRANT EXECUTE ON FUNCTION public.revoke_submitter_api_key TO authenticated;
 
--- 7. Comments
+-- 7. Secure functions and table from anon access
+-- Revoke all access from anon/public
+REVOKE ALL ON public.submitter_api_keys FROM anon;
+REVOKE ALL ON public.submitter_api_keys FROM public;
+GRANT SELECT, INSERT, UPDATE ON public.submitter_api_keys TO authenticated;
+
+-- Set secure search_path on SECURITY DEFINER functions
+ALTER FUNCTION public.generate_submitter_api_key(UUID, TEXT, INTEGER) SET search_path = public, pg_temp;
+ALTER FUNCTION public.revoke_submitter_api_key(UUID) SET search_path = public, pg_temp;
+
+-- Revoke EXECUTE from anon
+REVOKE EXECUTE ON FUNCTION public.generate_submitter_api_key(UUID, TEXT, INTEGER) FROM anon;
+REVOKE EXECUTE ON FUNCTION public.generate_submitter_api_key(UUID, TEXT, INTEGER) FROM public;
+GRANT EXECUTE ON FUNCTION public.generate_submitter_api_key(UUID, TEXT, INTEGER) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.revoke_submitter_api_key(UUID) FROM anon;
+REVOKE EXECUTE ON FUNCTION public.revoke_submitter_api_key(UUID) FROM public;
+GRANT EXECUTE ON FUNCTION public.revoke_submitter_api_key(UUID) TO authenticated;
+
+-- 8. Comments
 COMMENT ON TABLE public.submitter_api_keys IS 'API keys for automated check submission bots';
 COMMENT ON COLUMN public.submitter_api_keys.key_hash IS 'The API key value (should be hashed in production)';
 COMMENT ON COLUMN public.submitter_api_keys.last_used_at IS 'Automatically updated when key is used';

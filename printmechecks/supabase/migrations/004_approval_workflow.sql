@@ -259,11 +259,12 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- 16. Update RLS policies for checks table
--- Drop old policies
+-- Drop old policies (including any from migration 003)
 DROP POLICY IF EXISTS "Checks: select if admin or account access" ON public.checks;
 DROP POLICY IF EXISTS "Checks: insert if admin or account access" ON public.checks;
 DROP POLICY IF EXISTS "Checks: update/delete if admin or account access" ON public.checks;
 DROP POLICY IF EXISTS "Checks: delete if admin or account access" ON public.checks;
+DROP POLICY IF EXISTS "Checks: update if admin or account access" ON public.checks;
 
 -- New policies with status-aware permissions
 -- SELECT: Users can see checks for accounts they have access to
@@ -339,7 +340,7 @@ CREATE POLICY "Checks: update based on status and role"
     )
   )
   WITH CHECK (
-    -- Enforce valid status transitions
+    -- Enforce valid status transitions and prevent direct status manipulation
     (
       -- Can't change printed checks without admin override
       (OLD.status != 'printed' OR public.is_admin())
@@ -352,6 +353,19 @@ CREATE POLICY "Checks: update based on status and role"
         OR (OLD.status = 'printed' AND NEW.status IN ('printed', 'void') AND public.is_admin())
         OR (OLD.status = 'rejected' AND NEW.status = 'rejected')
         OR (OLD.status = 'void' AND NEW.status = 'void')
+      )
+      -- CRITICAL: Submitters can NEVER change status directly
+      -- Status changes to 'approved' or 'printed' MUST come through proper channels:
+      -- - Approved status can only be set by approvers/admins (via bulk_approve_checks or manual update)
+      -- - Printed status can only be set when status is already 'approved' or by admin
+      AND (
+        -- If user is a submitter (not approver/admin), they can only keep status as pending or set to pending
+        (
+          public.get_user_role() IN ('approver', 'admin')
+          OR (NEW.status = 'pending' AND (OLD.status IS NULL OR OLD.status = 'pending'))
+        )
+        -- Approvers can change pending -> approved or approved -> printed
+        -- But submitters cannot set approved or printed directly even on their own checks
       )
     )
   );
@@ -528,7 +542,69 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- Grant execute on function
 GRANT EXECUTE ON FUNCTION public.bulk_approve_checks TO authenticated;
 
--- 22. Comments for documentation
+-- 22. Secure new functions and tables from anon access
+-- Revoke all access from anon/public on new tables
+REVOKE ALL ON public.check_audit_log FROM anon;
+REVOKE ALL ON public.check_audit_log FROM public;
+GRANT SELECT ON public.check_audit_log TO authenticated;
+
+REVOKE ALL ON public.check_duplicates FROM anon;
+REVOKE ALL ON public.check_duplicates FROM public;
+GRANT SELECT ON public.check_duplicates TO authenticated;
+
+-- Set secure search_path on all SECURITY DEFINER functions
+ALTER FUNCTION public.get_user_role() SET search_path = public, pg_temp;
+ALTER FUNCTION public.can_approve_checks() SET search_path = public, pg_temp;
+ALTER FUNCTION public.created_check(UUID) SET search_path = public, pg_temp;
+ALTER FUNCTION public.log_check_audit(UUID, TEXT, JSONB, JSONB) SET search_path = public, pg_temp;
+ALTER FUNCTION public.check_for_duplicates(UUID, TEXT, TEXT) SET search_path = public, pg_temp;
+ALTER FUNCTION public.trigger_log_check_creation() SET search_path = public, pg_temp;
+ALTER FUNCTION public.trigger_log_check_update() SET search_path = public, pg_temp;
+ALTER FUNCTION public.trigger_track_duplicate() SET search_path = public, pg_temp;
+ALTER FUNCTION public.cleanup_old_duplicate_tracking() SET search_path = public, pg_temp;
+ALTER FUNCTION public.bulk_approve_checks(UUID[]) SET search_path = public, pg_temp;
+
+-- Revoke EXECUTE from anon on all new functions
+REVOKE EXECUTE ON FUNCTION public.get_user_role() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.get_user_role() FROM public;
+GRANT EXECUTE ON FUNCTION public.get_user_role() TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.can_approve_checks() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.can_approve_checks() FROM public;
+GRANT EXECUTE ON FUNCTION public.can_approve_checks() TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.created_check(UUID) FROM anon;
+REVOKE EXECUTE ON FUNCTION public.created_check(UUID) FROM public;
+GRANT EXECUTE ON FUNCTION public.created_check(UUID) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.log_check_audit(UUID, TEXT, JSONB, JSONB) FROM anon;
+REVOKE EXECUTE ON FUNCTION public.log_check_audit(UUID, TEXT, JSONB, JSONB) FROM public;
+GRANT EXECUTE ON FUNCTION public.log_check_audit(UUID, TEXT, JSONB, JSONB) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.check_for_duplicates(UUID, TEXT, TEXT) FROM anon;
+REVOKE EXECUTE ON FUNCTION public.check_for_duplicates(UUID, TEXT, TEXT) FROM public;
+GRANT EXECUTE ON FUNCTION public.check_for_duplicates(UUID, TEXT, TEXT) TO authenticated;
+
+-- Trigger functions don't need explicit grants
+REVOKE EXECUTE ON FUNCTION public.trigger_log_check_creation() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.trigger_log_check_creation() FROM public;
+
+REVOKE EXECUTE ON FUNCTION public.trigger_log_check_update() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.trigger_log_check_update() FROM public;
+
+REVOKE EXECUTE ON FUNCTION public.trigger_track_duplicate() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.trigger_track_duplicate() FROM public;
+
+REVOKE EXECUTE ON FUNCTION public.cleanup_old_duplicate_tracking() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.cleanup_old_duplicate_tracking() FROM public;
+GRANT EXECUTE ON FUNCTION public.cleanup_old_duplicate_tracking() TO authenticated;
+
+-- bulk_approve_checks should only be callable by authenticated users
+REVOKE EXECUTE ON FUNCTION public.bulk_approve_checks(UUID[]) FROM anon;
+REVOKE EXECUTE ON FUNCTION public.bulk_approve_checks(UUID[]) FROM public;
+GRANT EXECUTE ON FUNCTION public.bulk_approve_checks(UUID[]) TO authenticated;
+
+-- 23. Comments for documentation
 COMMENT ON TABLE public.check_audit_log IS 'Complete audit trail of all check operations';
 COMMENT ON TABLE public.check_duplicates IS 'Recent checks for duplicate detection (7 day window)';
 COMMENT ON COLUMN public.profiles.can_self_approve IS 'Admin override to allow user to approve their own checks';
