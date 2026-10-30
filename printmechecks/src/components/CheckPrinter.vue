@@ -129,6 +129,59 @@
                 </div>
                 </div>
 
+            <!-- Ready to Print Queue: shows unprinted checks created by automation -->
+            <div v-if="hasValidSelectedAccount && unprintedChecks.length > 0" 
+                 class="ready-to-print-queue" 
+                 style="margin-top: 20px; border: 2px solid #0d6efd; border-radius: 8px; padding: 16px; background-color: #e7f3ff;">
+                <h5 style="margin-bottom: 16px; color: #0d6efd;">
+                    <i class="bi bi-printer-fill"></i> Ready to Print 
+                    <span class="badge bg-primary">{{ unprintedChecks.length }}</span>
+                </h5>
+                <p style="margin-bottom: 12px; font-size: 14px; color: #495057;">
+                    Checks created by automation (Terry / Send to Controller) awaiting review and printing.
+                </p>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover bg-white">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Check #</th>
+                                <th>Payee</th>
+                                <th>Amount</th>
+                                <th>Memo</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="unpCheck in unprintedChecks" :key="unpCheck.id">
+                                <td>{{ unpCheck.date }}</td>
+                                <td>{{ unpCheck.checkNumber }}</td>
+                                <td>{{ unpCheck.payTo }}</td>
+                                <td>${{ formatMoney(unpCheck.amount) }}</td>
+                                <td>{{ unpCheck.memo || '-' }}</td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary me-1" 
+                                            @click="loadCheckForEditing(unpCheck)"
+                                            title="Edit and print">
+                                        <i class="bi bi-pencil"></i> Edit
+                                    </button>
+                                    <button class="btn btn-sm btn-success" 
+                                            @click="printCheckDirectly(unpCheck)"
+                                            title="Print as-is">
+                                        <i class="bi bi-printer"></i> Print
+                                    </button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div style="margin-top: 12px;">
+                    <button class="btn btn-success" @click="batchPrintUnprinted" :disabled="unprintedChecks.length === 0">
+                        <i class="bi bi-printer-fill"></i> Batch Print All ({{ unprintedChecks.length }})
+                    </button>
+                </div>
+            </div>
+
             <!-- Check basics: number, date, expense category -->
             <form class="row g-3" style="margin-top: 20px; border-top: 1px solid #e7e7e7; padding-top: 12px;">
                 <div class="col-md-2">
@@ -206,6 +259,16 @@ const isPreprinted = ref(false)
 const hasValidSelectedAccount = computed(() =>
   !!state.selectedAccountId && state.visibleBankAccounts.some((a) => a.id === state.selectedAccountId)
 )
+
+// Ready to Print queue: unprinted checks created by automation
+const unprintedChecks = ref([])
+const loadUnprintedChecks = async () => {
+  if (state.selectedAccountId) {
+    unprintedChecks.value = await state.getUnprintedChecks(state.selectedAccountId)
+  } else {
+    unprintedChecks.value = []
+  }
+}
 
 // Template switching
 const selectedTemplateId = ref('original')
@@ -778,6 +841,135 @@ async function saveToHistory () {
     alert('Check saved successfully!')
 }
 
+// Ready-to-Print queue functions
+async function loadCheckForEditing(unprintedCheck) {
+    // Load the unprinted check into the editor
+    Object.assign(check, unprintedCheck)
+    
+    // Scroll to the form
+    await nextTick(() => {
+        const formElement = document.querySelector('form')
+        if (formElement) {
+            formElement.scrollIntoView({ behavior: 'smooth' })
+        }
+    })
+}
+
+async function printCheckDirectly(unprintedCheck) {
+    // Print the check as-is without loading into editor
+    const checkToUse = { ...unprintedCheck }
+    
+    // Mark as printed
+    checkToUse.isPrinted = true
+    checkToUse.printedDate = new Date().toISOString()
+    
+    await state.updateCheck(checkToUse.id, checkToUse)
+    
+    // Print logic (simplified version of printCheck)
+    if (isPreprinted.value) {
+        const preprintedTemplate = state.customLayouts.find(layout => layout.name === 'preprinted')
+        if (!preprintedTemplate) {
+            alert('Preprinted template not found.')
+            return
+        }
+        const printWindow = window.open('', '_blank')
+        const checkHtml = await generateCheckHtml(checkToUse, preprintedTemplate)
+        printWindow.document.write(checkHtml)
+        printWindow.document.close()
+        printWindow.onload = () => {
+            printWindow.print()
+            printWindow.close()
+        }
+    } else {
+        const printWindow = window.open('', '_blank')
+        const checkHtml = await generateCheckHtml(checkToUse, currentTemplate.value)
+        printWindow.document.write(checkHtml)
+        printWindow.document.close()
+        printWindow.onload = () => {
+            printWindow.print()
+            printWindow.close()
+        }
+    }
+    
+    // Reload the unprinted queue
+    await loadUnprintedChecks()
+    alert('Check printed successfully!')
+}
+
+async function batchPrintUnprinted() {
+    if (unprintedChecks.value.length === 0) return
+    
+    if (!confirm(`Print ${unprintedChecks.value.length} checks?`)) return
+    
+    // Mark all as printed
+    const updates = unprintedChecks.value.map(check => ({
+        ...check,
+        isPrinted: true,
+        printedDate: new Date().toISOString()
+    }))
+    
+    // Update all in database
+    for (const checkToUpdate of updates) {
+        await state.updateCheck(checkToUpdate.id, checkToUpdate)
+    }
+    
+    // Generate combined HTML for all checks
+    const printWindow = window.open('', '_blank')
+    let combinedHtml = '<html><head><style>@page { size: letter; margin: 0; } @media print { .page-break { page-break-after: always; } }</style></head><body>'
+    
+    for (let i = 0; i < updates.length; i++) {
+        const checkData = updates[i]
+        const checkHtml = await generateCheckHtml(checkData, currentTemplate.value)
+        combinedHtml += checkHtml
+        if (i < updates.length - 1) {
+            combinedHtml += '<div class="page-break"></div>'
+        }
+    }
+    
+    combinedHtml += '</body></html>'
+    
+    printWindow.document.write(combinedHtml)
+    printWindow.document.close()
+    printWindow.onload = () => {
+        printWindow.print()
+        printWindow.close()
+    }
+    
+    // Reload the unprinted queue
+    await loadUnprintedChecks()
+    alert(`Batch printed ${updates.length} checks successfully!`)
+}
+
+// Helper to generate check HTML for printing
+async function generateCheckHtml(checkData, template) {
+    // Simplified HTML generation - you may need to adjust based on your template rendering
+    const toWords = new ToWords({
+        localeCode: 'en-US',
+        converterOptions: { currency: true }
+    })
+    const amountWords = toWords.convert(parseFloat(checkData.amount) || 0)
+    
+    return `
+        <div style="width: 850px; height: 350px; position: relative; border: 1px solid #ccc; margin: 20px; padding: 20px;">
+            <div style="position: absolute; top: 40px; left: 60px; font-weight: bold;">${checkData.accountHolderName}</div>
+            <div style="position: absolute; top: 70px; left: 60px;">
+                ${checkData.accountHolderAddress}<br>
+                ${checkData.accountHolderCity}, ${checkData.accountHolderState} ${checkData.accountHolderZip}
+            </div>
+            <div style="position: absolute; top: 40px; right: 60px; font-weight: bold;">Check #${checkData.checkNumber}</div>
+            <div style="position: absolute; top: 80px; right: 100px;">Date: ${checkData.date}</div>
+            <div style="position: absolute; top: 130px; left: 100px; font-size: 18px;">Pay to the order of: <strong>${checkData.payTo}</strong></div>
+            <div style="position: absolute; top: 130px; right: 60px; border: 2px solid #000; padding: 5px;">$${formatMoney(checkData.amount)}</div>
+            <div style="position: absolute; top: 170px; left: 100px; font-style: italic;">${amountWords}</div>
+            <div style="position: absolute; top: 210px; left: 100px;">Memo: ${checkData.memo}</div>
+            <div style="position: absolute; bottom: 40px; right: 100px; font-family: cursive;">${checkData.signature}</div>
+            <div style="position: absolute; bottom: 20px; left: 60px; font-size: 10px;">
+                ⑆${checkData.routingNumber}⑆ ${checkData.bankAccountNumber} ${checkData.checkNumber}
+            </div>
+        </div>
+    `
+}
+
 
 async function getNextCheckNumber(accountId) {
     if (!accountId) return '1000'
@@ -880,6 +1072,9 @@ const check = reactive({
 
 // Initialize check data asynchronously
 onMounted(async () => {
+    // Load unprinted checks queue
+    await loadUnprintedChecks()
+    
     // Priority 1: Load existing check being edited (from History or reprint)
     if (state.check) {
         check.id = state.check.id
@@ -937,6 +1132,9 @@ watch(check, async () => {
 
 // Watch for changes in selected company or account
 watch([() => state.selectedCompanyId, () => state.selectedAccountId], async () => {
+    // Reload unprinted checks when account changes
+    await loadUnprintedChecks()
+    
     if (state.selectedCompany && state.selectedAccount) {
         check.companyId = state.selectedCompanyId
         check.accountId = state.selectedAccountId

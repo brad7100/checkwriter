@@ -32,6 +32,10 @@
       >
         <div class="account-icon">
           <i class="bi bi-bank"></i>
+          <span v-if="unprintedCounts[account.id] > 0" 
+                class="badge bg-danger position-absolute top-0 start-100 translate-middle">
+            {{ unprintedCounts[account.id] }}
+          </span>
         </div>
         <div class="account-info">
           <h3 class="account-name">{{ account.name }}</h3>
@@ -118,7 +122,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase'
@@ -136,6 +140,25 @@ const newAccount = reactive({
   routingNumber: '',
   accountNumber: '',
   signature: ''
+})
+
+// Load unprinted check counts for each account
+const unprintedCounts = ref<Record<string, number>>({})
+
+const loadUnprintedCounts = async () => {
+  for (const account of store.accountsForSelectedCompany) {
+    const checks = await store.getUnprintedChecks(account.id)
+    unprintedCounts.value[account.id] = checks.length
+  }
+}
+
+// Load counts on mount and when company changes
+onMounted(() => {
+  loadUnprintedCounts()
+})
+
+watch(() => store.selectedCompanyId, () => {
+  loadUnprintedCounts()
 })
 
 const getInitials = (name: string) => {

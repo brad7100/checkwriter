@@ -934,6 +934,25 @@ export const useAppStore = defineStore('useAppStore', () => {
     }
   }
 
+  // Get unprinted checks (created by automation) for an account
+  const getUnprintedChecks = async (accountId: string): Promise<Check[]> => {
+    if (!accountId) return []
+    
+    const { data, error } = await supabase
+      .from('checks')
+      .select('*')
+      .eq('account_id', accountId)
+      .eq('is_printed', false)
+      .order('created_at', { ascending: false })
+    
+    if (error) {
+      console.error('Error fetching unprinted checks:', error)
+      return []
+    }
+    
+    return data || []
+  }
+
   return {
     check,
     draftChecks,
@@ -976,6 +995,7 @@ export const useAppStore = defineStore('useAppStore', () => {
     clearMustSetPassword,
     saveDraftCheck,
     getDraftCheck,
-    clearDraftCheck
+    clearDraftCheck,
+    getUnprintedChecks
   }
 })
