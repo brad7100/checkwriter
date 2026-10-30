@@ -240,11 +240,15 @@ const loadHistory = async () => {
 const filteredHistory = computed(() => {
   let filtered = history.value
 
-  // Filter by selected company and account (only show checks for current context)
-  if (store.selectedCompanyId && store.selectedAccountId) {
+  // Filter by selected account (primary filter - account determines company)
+  if (store.selectedAccountId) {
     filtered = filtered.filter(check => 
-      check.companyId === store.selectedCompanyId && 
       check.accountId === store.selectedAccountId
+    )
+  } else if (store.selectedCompanyId) {
+    // Fallback: if only company selected, show all checks for that company
+    filtered = filtered.filter(check => 
+      check.companyId === store.selectedCompanyId
     )
   }
 
