@@ -144,6 +144,12 @@
                     <table class="table table-sm table-hover bg-white">
                         <thead>
                             <tr>
+                                <th style="width: 30px;">
+                                    <input type="checkbox" 
+                                           v-model="selectAllChecks" 
+                                           @change="toggleSelectAll"
+                                           title="Select all">
+                                </th>
                                 <th>Date</th>
                                 <th>Check #</th>
                                 <th>Payee</th>
@@ -154,6 +160,11 @@
                         </thead>
                         <tbody>
                             <tr v-for="unpCheck in unprintedChecks" :key="unpCheck.id">
+                                <td>
+                                    <input type="checkbox" 
+                                           v-model="selectedCheckIds" 
+                                           :value="unpCheck.id">
+                                </td>
                                 <td>{{ unpCheck.date }}</td>
                                 <td>{{ unpCheck.checkNumber }}</td>
                                 <td>{{ unpCheck.payTo }}</td>
@@ -165,10 +176,15 @@
                                             title="Edit and print">
                                         <i class="bi bi-pencil"></i> Edit
                                     </button>
-                                    <button class="btn btn-sm btn-success" 
+                                    <button class="btn btn-sm btn-success me-1" 
                                             @click="printCheckDirectly(unpCheck)"
                                             title="Print as-is">
                                         <i class="bi bi-printer"></i> Print
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" 
+                                            @click="markAsPrinted(unpCheck)"
+                                            title="Mark as printed without printing">
+                                        <i class="bi bi-check-circle"></i> Mark Printed
                                     </button>
                                 </td>
                             </tr>
@@ -176,8 +192,14 @@
                     </table>
                 </div>
                 <div style="margin-top: 12px;">
-                    <button class="btn btn-success" @click="batchPrintUnprinted" :disabled="unprintedChecks.length === 0">
+                    <button class="btn btn-success me-2" @click="batchPrintUnprinted" :disabled="unprintedChecks.length === 0">
                         <i class="bi bi-printer-fill"></i> Batch Print All ({{ unprintedChecks.length }})
+                    </button>
+                    <button class="btn btn-outline-secondary" 
+                            @click="markSelectedAsPrinted" 
+                            :disabled="selectedCheckIds.length === 0"
+                            title="Mark selected checks as printed without printing">
+                        <i class="bi bi-check-circle-fill"></i> Mark Selected as Printed ({{ selectedCheckIds.length }})
                     </button>
                 </div>
             </div>
@@ -262,11 +284,25 @@ const hasValidSelectedAccount = computed(() =>
 
 // Ready to Print queue: unprinted checks created by automation
 const unprintedChecks = ref([])
+const selectedCheckIds = ref([])
+const selectAllChecks = ref(false)
+
 const loadUnprintedChecks = async () => {
   if (state.selectedAccountId) {
     unprintedChecks.value = await state.getUnprintedChecks(state.selectedAccountId)
   } else {
     unprintedChecks.value = []
+  }
+  // Clear selections when reloading
+  selectedCheckIds.value = []
+  selectAllChecks.value = false
+}
+
+const toggleSelectAll = () => {
+  if (selectAllChecks.value) {
+    selectedCheckIds.value = unprintedChecks.value.map(c => c.id)
+  } else {
+    selectedCheckIds.value = []
   }
 }
 
@@ -938,6 +974,60 @@ async function batchPrintUnprinted() {
     // Reload the unprinted queue
     await loadUnprintedChecks()
     alert(`Batch printed ${updates.length} checks successfully!`)
+}
+
+async function markAsPrinted(unprintedCheck) {
+    // Confirm before marking
+    const confirmMsg = `Mark check #${unprintedCheck.checkNumber} to ${unprintedCheck.payTo} as printed?\n\nThis will NOT print the check, only mark it as printed in the system.`
+    if (!confirm(confirmMsg)) return
+    
+    try {
+        // Update check with printed status (same format as normal print)
+        await state.updateCheck(unprintedCheck.id, {
+            ...unprintedCheck,
+            isPrinted: true,
+            printedDate: new Date().toISOString()
+        })
+        
+        // Reload the unprinted queue
+        await loadUnprintedChecks()
+        
+        // Success message
+        alert(`Check #${unprintedCheck.checkNumber} marked as printed.`)
+    } catch (error) {
+        console.error('Error marking check as printed:', error)
+        alert(`Failed to mark check as printed: ${error.message}`)
+    }
+}
+
+async function markSelectedAsPrinted() {
+    if (selectedCheckIds.value.length === 0) return
+    
+    const confirmMsg = `Mark ${selectedCheckIds.value.length} selected check(s) as printed?\n\nThis will NOT print the checks, only mark them as printed in the system.`
+    if (!confirm(confirmMsg)) return
+    
+    try {
+        // Get the checks to update
+        const checksToMark = unprintedChecks.value.filter(c => selectedCheckIds.value.includes(c.id))
+        
+        // Update all selected checks
+        for (const checkToMark of checksToMark) {
+            await state.updateCheck(checkToMark.id, {
+                ...checkToMark,
+                isPrinted: true,
+                printedDate: new Date().toISOString()
+            })
+        }
+        
+        // Reload the unprinted queue
+        await loadUnprintedChecks()
+        
+        // Success message
+        alert(`${checksToMark.length} check(s) marked as printed.`)
+    } catch (error) {
+        console.error('Error marking checks as printed:', error)
+        alert(`Failed to mark checks as printed: ${error.message}`)
+    }
 }
 
 // Helper to generate check HTML for printing
