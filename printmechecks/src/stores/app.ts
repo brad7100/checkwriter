@@ -11,6 +11,7 @@ export interface Company {
   city: string
   state: string
   zip: string
+  logo_url?: string
   quickbooksRealmId?: string
   quickbooksConnected?: boolean
   quickbooksCompanyName?: string
@@ -223,6 +224,7 @@ export const useAppStore = defineStore('useAppStore', () => {
           city: c.city,
           state: c.state,
           zip: c.zip,
+          logo_url: c.logo_url,
           quickbooksRealmId: c.quickbooks_realm_id,
           quickbooksConnected: c.quickbooks_connected,
           quickbooksCompanyName: c.quickbooks_company_name,
@@ -289,15 +291,40 @@ export const useAppStore = defineStore('useAppStore', () => {
         console.log(`Loaded ${customLayouts.value.length} layouts:`, layouts.map(l => ({ id: l.id, name: l.name })))
       }
 
-      // Load session preferences from localStorage only
-      const selectedCompData = localStorage.getItem('selectedCompanyId')
-      if (selectedCompData) {
-        selectedCompanyId.value = selectedCompData
+      // Try to restore last selection from user profile first, then fall back to localStorage
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user && userProfile.value) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('last_selected_company_id, last_selected_account_id')
+            .eq('id', user.id)
+            .single()
+          
+          if (profile?.last_selected_company_id) {
+            selectedCompanyId.value = profile.last_selected_company_id
+          }
+          if (profile?.last_selected_account_id) {
+            selectedAccountId.value = profile.last_selected_account_id
+          }
+        }
+      } catch (error) {
+        console.log('Could not load last selection from profile, using localStorage')
+      }
+      
+      // Fall back to localStorage if profile didn't have data
+      if (!selectedCompanyId.value) {
+        const selectedCompData = localStorage.getItem('selectedCompanyId')
+        if (selectedCompData) {
+          selectedCompanyId.value = selectedCompData
+        }
       }
 
-      const selectedAccData = localStorage.getItem('selectedAccountId')
-      if (selectedAccData) {
-        selectedAccountId.value = selectedAccData
+      if (!selectedAccountId.value) {
+        const selectedAccData = localStorage.getItem('selectedAccountId')
+        if (selectedAccData) {
+          selectedAccountId.value = selectedAccData
+        }
       }
 
       isLoaded.value = true
@@ -310,11 +337,23 @@ export const useAppStore = defineStore('useAppStore', () => {
     }
   }
 
-  // Save session preferences only (selected company/account)
-  const saveData = () => {
+  // Save session preferences (selected company/account) to both localStorage and profile
+  const saveData = async () => {
     try {
       localStorage.setItem('selectedCompanyId', selectedCompanyId.value)
       localStorage.setItem('selectedAccountId', selectedAccountId.value)
+      
+      // Also save to user profile for persistence across devices
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user && selectedCompanyId.value && selectedAccountId.value) {
+        await supabase
+          .from('profiles')
+          .update({
+            last_selected_company_id: selectedCompanyId.value,
+            last_selected_account_id: selectedAccountId.value
+          })
+          .eq('id', user.id)
+      }
     } catch (error) {
       console.error('Error saving session data:', error)
     }
@@ -374,6 +413,7 @@ export const useAppStore = defineStore('useAppStore', () => {
           city: updates.city,
           state: updates.state,
           zip: updates.zip,
+          logo_url: updates.logo_url,
           quickbooks_realm_id: updates.quickbooksRealmId,
           quickbooks_connected: updates.quickbooksConnected,
           quickbooks_company_name: updates.quickbooksCompanyName,

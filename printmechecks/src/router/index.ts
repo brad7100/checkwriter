@@ -18,16 +18,28 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      path: '/company-picker',
+      name: 'company-picker',
+      component: () => import('../views/CompanyPickerView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/account-picker',
+      name: 'account-picker',
+      component: () => import('../views/AccountPickerView.vue'),
+      meta: { requiresAuth: true, requiresCompany: true }
+    },
+    {
       path: '/',
       name: 'home',
       component: HomeView,
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true, requiresAccount: true }
     },
     {
       path: '/history',
       name: 'history',
       component: () => import('../views/HistoryView.vue'),
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true, requiresAccount: true }
     },
     {
       path: '/manage',
@@ -50,10 +62,12 @@ const router = createRouter({
   ]
 })
 
-// Navigation guard: require auth, redirect invite users to set password, admin-only routes
+// Navigation guard: require auth, redirect invite users to set password, admin-only routes, company/account selection
 router.beforeEach((to, from, next) => {
   const store = useAppStore()
   const isSetPassword = to.name === 'set-password'
+  const isCompanyPicker = to.name === 'company-picker'
+  const isAccountPicker = to.name === 'account-picker'
 
   if (to.meta.requiresAuth) {
     if (store.userProfile?.must_set_password && !isSetPassword) {
@@ -61,17 +75,31 @@ router.beforeEach((to, from, next) => {
       return
     }
     if (isSetPassword && !store.userProfile?.must_set_password) {
-      next({ path: '/' })
+      next({ name: 'company-picker' })
       return
     }
   }
+  
+  // Check if company selection is required
+  if (to.meta.requiresAccount || to.meta.requiresCompany) {
+    if (!store.selectedCompanyId && !isCompanyPicker) {
+      next({ name: 'company-picker' })
+      return
+    }
+    
+    if (to.meta.requiresAccount && !store.selectedAccountId && !isAccountPicker) {
+      next({ name: 'account-picker' })
+      return
+    }
+  }
+  
   if (to.meta.requiresAdmin) {
     if (!store.userProfile) {
-      next({ path: '/' })
+      next({ name: 'company-picker' })
       return
     }
     if (store.userProfile.role !== 'admin') {
-      next({ path: '/' })
+      next({ name: 'company-picker' })
       return
     }
   }

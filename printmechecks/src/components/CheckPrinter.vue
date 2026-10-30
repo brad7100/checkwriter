@@ -91,12 +91,10 @@
         <div class="check-data" style="position: absolute; top: 450px">
             <button type="button" style="float: right;" class="btn btn-primary" @click="printCheck">Print (Ctrl + P)</button>
             
-            <!-- Company and Account Selection - Two Column -->
+            <!-- Check Options -->
             <div style="margin-bottom: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 8px;">
-                <CompanyAccountManager />
-                
                 <!-- Preprinted Check Toggle -->
-                <div class="row mt-3" v-if="state.selectedAccountId">
+                <div class="row" v-if="state.selectedAccountId">
                     <div class="col-12">
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" v-model="isPreprinted" id="preprintedToggle">
@@ -199,7 +197,6 @@ import { ref, reactive, computed, nextTick, watch, onMounted, onUnmounted } from
 import { formatMoney } from '../utilities.ts'
 import { useAppStore } from '../stores/app.ts'
 import { useRouter } from 'vue-router'
-import CompanyAccountManager from './CompanyAccountManager.vue'
 
 const state = useAppStore()
 const router = useRouter()
