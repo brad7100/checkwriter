@@ -159,8 +159,11 @@ const getLogoUrl = (logoPath: string) => {
 }
 
 const selectCompany = (companyId: string) => {
+  // Only reset account selection if actually changing companies
+  if (store.selectedCompanyId !== companyId) {
+    store.selectedAccountId = ''
+  }
   store.selectedCompanyId = companyId
-  store.selectedAccountId = '' // Reset account selection
   store.saveData()
   router.push('/account-picker')
 }
@@ -282,10 +285,10 @@ const closeAddCompanyModal = () => {
 }
 
 onMounted(() => {
-  // If a company is already selected, the user might have clicked "Change Company"
-  // Clear selections to force reselection
+  // Don't clear selections on mount - preserve existing state
+  // Only clear company selection (user explicitly navigated here or clicked "Change Company")
   store.selectedCompanyId = ''
-  store.selectedAccountId = ''
+  // Keep selectedAccountId - will be cleared if user picks a different company
   
   // If user only has access to one company, auto-select it and move to account picker
   if (store.visibleCompanies.length === 1) {

@@ -59,10 +59,17 @@ onMounted(async () => {
       console.log('Auth state change - redirecting to /auth')
       router.push('/auth')
     } else if (isAuthenticated.value && event === 'SIGNED_IN') {
-      // After sign in, redirect to company picker
-      console.log('User signed in - redirecting to company picker')
-      router.push('/company-picker')
+      // Only redirect to company picker if currently on the auth/login page
+      // Ignore SIGNED_IN events from tab refocus, token refresh, etc.
+      const currentPath = router.currentRoute.value.path
+      if (currentPath === '/auth') {
+        console.log('User signed in from login page - redirecting to company picker')
+        router.push('/company-picker')
+      } else {
+        console.log('SIGNED_IN event ignored (already on page:', currentPath, ')')
+      }
     }
+    // Ignore TOKEN_REFRESHED and INITIAL_SESSION for navigation
   })
 
   // When profile loads and invited user must set password, redirect to set-password
