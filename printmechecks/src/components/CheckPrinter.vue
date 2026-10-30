@@ -89,6 +89,90 @@
             </div>
         </div>
         <div class="check-data" style="position: absolute; top: 450px">
+            <!-- Ready to Print Queue: FIRST THING - shows unprinted checks created by automation -->
+            <div v-if="hasValidSelectedAccount" 
+                 class="ready-to-print-queue" 
+                 style="margin-bottom: 20px; border: 2px solid #0d6efd; border-radius: 8px; padding: 16px; background-color: #e7f3ff;">
+                <h5 style="margin-bottom: 16px; color: #0d6efd;">
+                    <i class="bi bi-printer-fill"></i> Ready to Print 
+                    <span v-if="unprintedChecks.length > 0" class="badge bg-primary">{{ unprintedChecks.length }}</span>
+                </h5>
+                
+                <!-- Empty state -->
+                <div v-if="unprintedChecks.length === 0" style="color: #6c757d; font-size: 14px; font-style: italic;">
+                    <i class="bi bi-check-circle"></i> No checks waiting to print
+                </div>
+                
+                <!-- Queue content -->
+                <div v-else>
+                    <p style="margin-bottom: 12px; font-size: 14px; color: #495057;">
+                        Checks created by automation (Terry / Send to Controller) awaiting review and printing.
+                    </p>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover bg-white">
+                            <thead>
+                                <tr>
+                                    <th style="width: 30px;">
+                                        <input type="checkbox" 
+                                               v-model="selectAllChecks" 
+                                               @change="toggleSelectAll"
+                                               title="Select all">
+                                    </th>
+                                    <th>Date</th>
+                                    <th>Check #</th>
+                                    <th>Payee</th>
+                                    <th>Amount</th>
+                                    <th>Memo</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="unpCheck in unprintedChecks" :key="unpCheck.id">
+                                    <td>
+                                        <input type="checkbox" 
+                                               v-model="selectedCheckIds" 
+                                               :value="unpCheck.id">
+                                    </td>
+                                    <td>{{ unpCheck.date }}</td>
+                                    <td>{{ unpCheck.checkNumber }}</td>
+                                    <td>{{ unpCheck.payTo }}</td>
+                                    <td>${{ formatMoney(unpCheck.amount) }}</td>
+                                    <td>{{ unpCheck.memo || '-' }}</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-primary me-1" 
+                                                @click="loadCheckForEditing(unpCheck)"
+                                                title="Edit and print">
+                                            <i class="bi bi-pencil"></i> Edit
+                                        </button>
+                                        <button class="btn btn-sm btn-success me-1" 
+                                                @click="printCheckDirectly(unpCheck)"
+                                                title="Print as-is">
+                                            <i class="bi bi-printer"></i> Print
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-secondary" 
+                                                @click="markAsPrinted(unpCheck)"
+                                                title="Mark as printed without printing">
+                                            <i class="bi bi-check-circle"></i> Mark Printed
+                                        </button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div style="margin-top: 12px;">
+                        <button class="btn btn-success me-2" @click="batchPrintUnprinted" :disabled="unprintedChecks.length === 0">
+                            <i class="bi bi-printer-fill"></i> Batch Print All ({{ unprintedChecks.length }})
+                        </button>
+                        <button class="btn btn-outline-secondary" 
+                                @click="markSelectedAsPrinted" 
+                                :disabled="selectedCheckIds.length === 0"
+                                title="Mark selected checks as printed without printing">
+                            <i class="bi bi-check-circle-fill"></i> Mark Selected as Printed ({{ selectedCheckIds.length }})
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <button type="button" style="float: right;" class="btn btn-primary" @click="printCheck">Print (Ctrl + P)</button>
             
             <!-- Check Options -->
@@ -128,81 +212,6 @@
                 </div>
                 </div>
                 </div>
-
-            <!-- Ready to Print Queue: shows unprinted checks created by automation -->
-            <div v-if="hasValidSelectedAccount && unprintedChecks.length > 0" 
-                 class="ready-to-print-queue" 
-                 style="margin-top: 20px; border: 2px solid #0d6efd; border-radius: 8px; padding: 16px; background-color: #e7f3ff;">
-                <h5 style="margin-bottom: 16px; color: #0d6efd;">
-                    <i class="bi bi-printer-fill"></i> Ready to Print 
-                    <span class="badge bg-primary">{{ unprintedChecks.length }}</span>
-                </h5>
-                <p style="margin-bottom: 12px; font-size: 14px; color: #495057;">
-                    Checks created by automation (Terry / Send to Controller) awaiting review and printing.
-                </p>
-                <div class="table-responsive">
-                    <table class="table table-sm table-hover bg-white">
-                        <thead>
-                            <tr>
-                                <th style="width: 30px;">
-                                    <input type="checkbox" 
-                                           v-model="selectAllChecks" 
-                                           @change="toggleSelectAll"
-                                           title="Select all">
-                                </th>
-                                <th>Date</th>
-                                <th>Check #</th>
-                                <th>Payee</th>
-                                <th>Amount</th>
-                                <th>Memo</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr v-for="unpCheck in unprintedChecks" :key="unpCheck.id">
-                                <td>
-                                    <input type="checkbox" 
-                                           v-model="selectedCheckIds" 
-                                           :value="unpCheck.id">
-                                </td>
-                                <td>{{ unpCheck.date }}</td>
-                                <td>{{ unpCheck.checkNumber }}</td>
-                                <td>{{ unpCheck.payTo }}</td>
-                                <td>${{ formatMoney(unpCheck.amount) }}</td>
-                                <td>{{ unpCheck.memo || '-' }}</td>
-                                <td>
-                                    <button class="btn btn-sm btn-primary me-1" 
-                                            @click="loadCheckForEditing(unpCheck)"
-                                            title="Edit and print">
-                                        <i class="bi bi-pencil"></i> Edit
-                                    </button>
-                                    <button class="btn btn-sm btn-success me-1" 
-                                            @click="printCheckDirectly(unpCheck)"
-                                            title="Print as-is">
-                                        <i class="bi bi-printer"></i> Print
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-secondary" 
-                                            @click="markAsPrinted(unpCheck)"
-                                            title="Mark as printed without printing">
-                                        <i class="bi bi-check-circle"></i> Mark Printed
-                                    </button>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-                <div style="margin-top: 12px;">
-                    <button class="btn btn-success me-2" @click="batchPrintUnprinted" :disabled="unprintedChecks.length === 0">
-                        <i class="bi bi-printer-fill"></i> Batch Print All ({{ unprintedChecks.length }})
-                    </button>
-                    <button class="btn btn-outline-secondary" 
-                            @click="markSelectedAsPrinted" 
-                            :disabled="selectedCheckIds.length === 0"
-                            title="Mark selected checks as printed without printing">
-                        <i class="bi bi-check-circle-fill"></i> Mark Selected as Printed ({{ selectedCheckIds.length }})
-                    </button>
-                </div>
-            </div>
 
             <!-- Check basics: number, date, expense category -->
             <form class="row g-3" style="margin-top: 20px; border-top: 1px solid #e7e7e7; padding-top: 12px;">
@@ -1160,6 +1169,24 @@ const check = reactive({
     printedDate: null
 })
 
+// Helper function to scroll to top robustly
+const scrollToTop = () => {
+    // Scroll window
+    window.scrollTo(0, 0)
+    
+    // Also scroll the main element if it exists and is scrollable
+    const mainElement = document.querySelector('main')
+    if (mainElement) {
+        mainElement.scrollTop = 0
+    }
+    
+    // Scroll any wrapper containers
+    const wrapperElement = document.getElementById('wrapper')
+    if (wrapperElement) {
+        wrapperElement.scrollTop = 0
+    }
+}
+
 // Initialize check data asynchronously
 onMounted(async () => {
     // Load unprinted checks queue
@@ -1203,6 +1230,13 @@ onMounted(async () => {
         const newCheck = await genNewCheck()
         Object.assign(check, newCheck)
     }
+    
+    // Scroll to top after nextTick (after initial render)
+    await nextTick()
+    scrollToTop()
+    
+    // Scroll again after a short delay to handle async content
+    setTimeout(scrollToTop, 100)
 })
 
 const line = ref(null)
@@ -1253,6 +1287,13 @@ watch([() => state.selectedCompanyId, () => state.selectedAccountId], async () =
             selectedTemplateId.value = 'original'
             console.log('No default layout set, using original')
         }
+        
+        // Scroll to top after account selection and data loads
+        await nextTick()
+        scrollToTop()
+        
+        // Scroll again after async content settles
+        setTimeout(scrollToTop, 100)
     } else {
         selectedTemplateId.value = 'original'
     }
@@ -1271,6 +1312,14 @@ watch(() => state.selectedAccount?.defaultLayoutId, (newLayoutId) => {
 // Watch for when custom layouts are loaded
 watch(() => state.customLayouts, (newLayouts) => {
     console.log('Custom layouts updated:', newLayouts.map(l => ({ id: l.id, name: l.name })))
+}, { deep: true })
+
+// Watch for when visibleBankAccounts loads (in case it's empty at mount)
+watch(() => state.visibleBankAccounts, async (newAccounts) => {
+    // If we have a selected account and accounts just loaded, reload the unprinted queue
+    if (state.selectedAccountId && newAccounts && newAccounts.length > 0) {
+        await loadUnprintedChecks()
+    }
 }, { deep: true })
 
 function handlePrintShortcut(event: KeyboardEvent) {
