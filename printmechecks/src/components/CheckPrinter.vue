@@ -532,6 +532,11 @@ async function printCheck () {
         check.id = savedCheck.id
     }
     
+    // Clear draft after successful print
+    if (state.selectedAccountId) {
+        state.clearDraftCheck(state.selectedAccountId)
+    }
+    
     if (isPreprinted.value) {
         // Use preprinted template for printing with native print dialog
         const preprintedTemplate = state.customLayouts.find(layout => layout.name === 'preprinted')
@@ -765,6 +770,11 @@ async function saveToHistory () {
         check.id = savedCheck.id
     }
     
+    // Clear draft after successful save
+    if (state.selectedAccountId) {
+        state.clearDraftCheck(state.selectedAccountId)
+    }
+    
     alert('Check saved successfully!')
 }
 
@@ -870,7 +880,7 @@ const check = reactive({
 
 // Initialize check data asynchronously
 onMounted(async () => {
-    // First, check if we have an existing check to load
+    // Priority 1: Load existing check being edited (from History or reprint)
     if (state.check) {
         check.id = state.check.id
         check.accountHolderName = state.check.accountHolderName
@@ -892,8 +902,19 @@ onMounted(async () => {
         check.isPrinted = state.check.isPrinted
         check.printedDate = state.check.printedDate
         state.check = null
+    } 
+    // Priority 2: Load draft check for this account (if returning to tab)
+    else if (state.selectedAccountId) {
+        const draft = state.getDraftCheck(state.selectedAccountId)
+        if (draft && Object.keys(draft).length > 0) {
+            Object.assign(check, draft)
+        } else {
+            // Priority 3: Generate a new check
+            const newCheck = await genNewCheck()
+            Object.assign(check, newCheck)
+        }
     } else {
-        // Generate a new check if no existing check
+        // Fallback: Generate a new check
         const newCheck = await genNewCheck()
         Object.assign(check, newCheck)
     }
@@ -906,7 +927,13 @@ watch(check, async () => {
         let computedLine = line?.value?.clientWidth
         check.lineLength = computedLine
     })
-}, { immediate: true })
+    
+    // Save draft whenever check changes (debounced by reactivity)
+    if (state.selectedAccountId && !check.id) {
+        // Only save drafts for unsaved checks
+        state.saveDraftCheck(state.selectedAccountId, { ...check })
+    }
+}, { immediate: true, deep: true })
 
 // Watch for changes in selected company or account
 watch([() => state.selectedCompanyId, () => state.selectedAccountId], async () => {
