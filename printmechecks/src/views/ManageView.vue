@@ -4,7 +4,7 @@
       <div class="container">
         <div class="d-flex justify-content-between align-items-center mb-4">
           <h2>Manage Companies & Accounts</h2>
-          <div class="d-flex gap-2">
+          <div v-if="store.isAdmin" class="d-flex gap-2">
             <button class="btn btn-primary" @click="showAddCompanyModal = true">
               <i class="bi bi-plus-lg"></i> Add Company
             </button>
@@ -12,7 +12,7 @@
         </div>
 
         <!-- Invite user / Password reset (admin only) -->
-        <div class="card mb-4 border-primary">
+        <div v-if="store.isAdmin" class="card mb-4 border-primary">
           <div class="card-body">
             <h5 class="card-title"><i class="bi bi-people me-2"></i>Users</h5>
             <p class="text-muted small mb-0">Only admins can add users. New users receive an email to set their password. After they sign in, assign them to bank accounts below.</p>
@@ -48,7 +48,7 @@
                       {{ company.address }}, {{ company.city }}, {{ company.state }} {{ company.zip }}
                     </small>
                   </div>
-                  <div>
+                  <div v-if="store.isAdmin">
                     <button class="btn btn-outline-secondary btn-sm me-2" @click="editCompany(company)">
                       <i class="bi bi-pencil"></i> Edit
                     </button>
@@ -80,7 +80,7 @@
                 <div class="accounts-section mt-3">
                   <div class="d-flex justify-content-between align-items-center mb-3">
                     <h5 class="mb-0"><i class="bi bi-bank2 me-2"></i>Bank Accounts</h5>
-                    <button class="btn btn-outline-primary btn-sm" @click="showAddAccountModalForCompany(company.id)">
+                    <button v-if="store.isAdmin" class="btn btn-outline-primary btn-sm" @click="showAddAccountModalForCompany(company.id)">
                       <i class="bi bi-plus"></i> Add Account
                     </button>
                   </div>
@@ -103,7 +103,7 @@
                             <strong>Account:</strong> ****{{ account.accountNumber.slice(-4) }}<br>
                             <strong>Default Layout:</strong> {{ getLayoutName(account.defaultLayoutId) }}
                           </p>
-                          <div class="btn-group btn-group-sm" role="group">
+                          <div v-if="store.isAdmin" class="btn-group btn-group-sm" role="group">
                             <button class="btn btn-outline-primary" @click="editAccount(account)">
                               <i class="bi bi-pencil"></i> Edit
                             </button>
@@ -112,7 +112,7 @@
                             </button>
                           </div>
                           <!-- User access (admin only) -->
-                          <div class="mt-3 pt-3 border-top">
+                          <div v-if="store.isAdmin" class="mt-3 pt-3 border-top">
                             <strong class="small text-muted"><i class="bi bi-person-check me-1"></i>Users with access</strong>
                             <ul v-if="getUsersForAccount(account.id).length > 0" class="list-unstyled small mb-2 mt-1">
                               <li v-for="u in getUsersForAccount(account.id)" :key="u.id" class="d-flex align-items-center justify-content-between py-1">
