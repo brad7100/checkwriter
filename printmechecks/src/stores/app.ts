@@ -106,6 +106,7 @@ export interface CustomLayout {
 export const useAppStore = defineStore('useAppStore', () => {
   // State
   const check = ref<Check | null>(null)
+  const draftChecks = ref<Record<string, Partial<Check>>>({}) // Draft checks keyed by accountId
   const companies = ref<Company[]>([])
   const bankAccounts = ref<BankAccount[]>([])
   const selectedCompanyId = ref('')
@@ -325,6 +326,16 @@ export const useAppStore = defineStore('useAppStore', () => {
         if (selectedAccData) {
           selectedAccountId.value = selectedAccData
         }
+      }
+
+      // Load draft checks from sessionStorage
+      try {
+        const savedDrafts = sessionStorage.getItem('draftChecks')
+        if (savedDrafts) {
+          draftChecks.value = JSON.parse(savedDrafts)
+        }
+      } catch (error) {
+        console.log('Could not load draft checks from sessionStorage')
       }
 
       isLoaded.value = true
@@ -895,8 +906,56 @@ export const useAppStore = defineStore('useAppStore', () => {
     return { error }
   }
 
+  // Draft check management
+  const saveDraftCheck = (accountId: string, checkData: Partial<Check>) => {
+    if (!accountId) return
+    draftChecks.value[accountId] = checkData
+    // Persist to sessionStorage
+    try {
+      sessionStorage.setItem('draftChecks', JSON.stringify(draftChecks.value))
+    } catch (error) {
+      console.error('Error saving draft check to sessionStorage:', error)
+    }
+  }
+
+  const getDraftCheck = (accountId: string): Partial<Check> | null => {
+    if (!accountId) return null
+    return draftChecks.value[accountId] || null
+  }
+
+  const clearDraftCheck = (accountId: string) => {
+    if (!accountId) return
+    delete draftChecks.value[accountId]
+    // Persist to sessionStorage
+    try {
+      sessionStorage.setItem('draftChecks', JSON.stringify(draftChecks.value))
+    } catch (error) {
+      console.error('Error clearing draft check from sessionStorage:', error)
+    }
+  }
+
+  // Get unprinted checks (created by automation) for an account
+  const getUnprintedChecks = async (accountId: string): Promise<Check[]> => {
+    if (!accountId) return []
+    
+    const { data, error } = await supabase
+      .from('checks')
+      .select('*')
+      .eq('account_id', accountId)
+      .eq('is_printed', false)
+      .order('created_at', { ascending: false })
+    
+    if (error) {
+      console.error('Error fetching unprinted checks:', error)
+      return []
+    }
+    
+    return data || []
+  }
+
   return {
     check,
+    draftChecks,
     companies,
     bankAccounts,
     selectedCompanyId,
@@ -933,6 +992,10 @@ export const useAppStore = defineStore('useAppStore', () => {
     getQBVendors,
     initializeAuth,
     signOut,
-    clearMustSetPassword
+    clearMustSetPassword,
+    saveDraftCheck,
+    getDraftCheck,
+    clearDraftCheck,
+    getUnprintedChecks
   }
 })

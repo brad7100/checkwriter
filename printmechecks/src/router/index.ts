@@ -5,6 +5,14 @@ import { useAppStore } from '../stores/app'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
+  scrollBehavior(to, from, savedPosition) {
+    // Use saved position for back/forward navigation
+    if (savedPosition) {
+      return savedPosition
+    }
+    // Scroll to top for all other navigation
+    return { top: 0 }
+  },
   routes: [
     {
       path: '/auth',

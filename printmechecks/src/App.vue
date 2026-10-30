@@ -135,6 +135,11 @@ const createNewCheck = () => {
   // Clear any existing check data
   store.check = null
   
+  // Clear draft for current account
+  if (store.selectedAccountId) {
+    store.clearDraftCheck(store.selectedAccountId)
+  }
+  
   // Force CheckPrinter component to re-render with new check
   checkWriterKey.value++
   
