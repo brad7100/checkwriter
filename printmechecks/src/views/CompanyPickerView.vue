@@ -286,19 +286,27 @@ onMounted(() => {
   // Clear selections to force reselection
   store.selectedCompanyId = ''
   store.selectedAccountId = ''
+  
+  // If user only has access to one company, auto-select it and move to account picker
+  if (store.visibleCompanies.length === 1) {
+    const onlyCompany = store.visibleCompanies[0]
+    store.selectedCompanyId = onlyCompany.id
+    store.saveData()
+    router.push('/account-picker')
+  }
 })
 </script>
 
 <style scoped>
 .company-picker-container {
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #ffffff;
   padding: 40px 20px;
 }
 
 .picker-header {
   text-align: center;
-  color: white;
+  color: #2d3748;
   margin-bottom: 40px;
 }
 
@@ -306,7 +314,6 @@ onMounted(() => {
   max-width: 250px;
   height: auto;
   margin-bottom: 20px;
-  background: white;
   padding: 15px;
   border-radius: 12px;
 }
@@ -315,11 +322,12 @@ onMounted(() => {
   font-size: 2.5rem;
   font-weight: 700;
   margin-bottom: 10px;
+  color: #2d3748;
 }
 
 .picker-header .subtitle {
   font-size: 1.1rem;
-  opacity: 0.9;
+  color: #718096;
 }
 
 .companies-grid {
@@ -370,13 +378,14 @@ onMounted(() => {
   width: 120px;
   height: 120px;
   border-radius: 12px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #f7fafc;
+  border: 2px solid #e2e8f0;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 2.5rem;
   font-weight: 700;
-  color: white;
+  color: #4a5568;
   text-transform: uppercase;
 }
 
@@ -404,7 +413,7 @@ onMounted(() => {
 }
 
 .add-company-card:hover {
-  border-color: #667eea;
+  border-color: #0d6efd;
   background: white;
 }
 
@@ -420,7 +429,7 @@ onMounted(() => {
 
 .add-company-content i {
   font-size: 3rem;
-  color: #667eea;
+  color: #0d6efd;
 }
 
 .empty-state {
