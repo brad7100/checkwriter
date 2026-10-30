@@ -150,6 +150,7 @@ const getInitials = (name: string) => {
 const getLogoUrl = (logoPath: string) => {
   if (!logoPath) return ''
   if (logoPath.startsWith('http')) return logoPath
+  if (logoPath.startsWith('/')) return logoPath // Static file from public directory
   
   const { data } = supabase.storage
     .from('company-logos')
