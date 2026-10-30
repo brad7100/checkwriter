@@ -950,7 +950,53 @@ export const useAppStore = defineStore('useAppStore', () => {
       return []
     }
     
-    return data || []
+    // Map snake_case to camelCase and filter out voids
+    const mapped = data?.map(c => ({
+      id: c.id,
+      companyId: c.company_id,
+      accountId: c.account_id,
+      accountHolderName: c.account_holder_name,
+      accountHolderAddress: c.account_holder_address,
+      accountHolderCity: c.account_holder_city,
+      accountHolderState: c.account_holder_state,
+      accountHolderZip: c.account_holder_zip,
+      checkNumber: c.check_number,
+      date: c.date,
+      bankName: c.bank_name,
+      amount: c.amount,
+      payTo: c.pay_to,
+      memo: c.memo,
+      signature: c.signature,
+      routingNumber: c.routing_number,
+      bankAccountNumber: c.bank_account_number,
+      mailToName: c.mail_to_name,
+      mailToAddress: c.mail_to_address,
+      mailToSuite: c.mail_to_suite,
+      mailToCity: c.mail_to_city,
+      mailToState: c.mail_to_state,
+      mailToZip: c.mail_to_zip,
+      isPrinted: c.is_printed,
+      printedDate: c.printed_date,
+      expenseCategory: c.expense_category,
+      quickbooksId: c.quickbooks_id,
+      quickbooksVendorId: c.quickbooks_vendor_id,
+      syncedToQuickBooks: c.synced_to_quickbooks,
+      syncedAt: c.synced_at
+    })) || []
+    
+    // Filter out voided checks (amount is 0 or memo is 'Void')
+    return mapped.filter(check => {
+      // Parse amount (it's stored as text like '0', '0.00', '4264.38')
+      const amount = parseFloat(check.amount || '0')
+      
+      // Exclude if amount is 0
+      if (amount === 0) return false
+      
+      // Exclude if memo is 'Void' (case-insensitive)
+      if (check.memo && check.memo.toLowerCase() === 'void') return false
+      
+      return true
+    })
   }
 
   return {
