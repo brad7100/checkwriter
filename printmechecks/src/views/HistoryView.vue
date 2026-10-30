@@ -14,7 +14,7 @@
 
         <!-- Search and Filters -->
         <div class="row mb-3">
-            <div class="col-md-6">
+            <div class="col-md-9">
                 <label class="form-label"><strong>Quick Search:</strong></label>
                 <div class="input-group">
                     <input 
@@ -27,15 +27,6 @@
                         <i class="bi bi-x"></i>
                     </button>
                 </div>
-            </div>
-            <div class="col-md-3">
-                <label class="form-label"><strong>Filter by Account:</strong></label>
-                <select class="form-select" v-model="filterAccountId">
-                    <option value="">All Accounts</option>
-                    <option v-for="account in store.visibleBankAccounts" :key="account.id" :value="account.id">
-                        {{ account.name }} ({{ account.bankName }})
-                    </option>
-                </select>
             </div>
             <div class="col-md-3 d-flex align-items-end">
                 <button class="btn btn-outline-primary" @click="showAdvancedSearch = true">
@@ -228,7 +219,6 @@ const router = useRouter()
 
 const history = ref<Check[]>([])
 const selectedChecks = ref<string[]>([])
-const filterAccountId = ref('')
 const quickSearch = ref('')
 const showAdvancedSearch = ref(false)
 const advancedSearch = ref({
@@ -250,9 +240,12 @@ const loadHistory = async () => {
 const filteredHistory = computed(() => {
   let filtered = history.value
 
-  // Apply account filter
-  if (filterAccountId.value) {
-    filtered = filtered.filter(check => check.accountId === filterAccountId.value)
+  // Filter by selected company and account (only show checks for current context)
+  if (store.selectedCompanyId && store.selectedAccountId) {
+    filtered = filtered.filter(check => 
+      check.companyId === store.selectedCompanyId && 
+      check.accountId === store.selectedAccountId
+    )
   }
 
   // Apply quick search

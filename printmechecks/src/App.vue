@@ -54,10 +54,14 @@ onMounted(async () => {
     userEmail.value = session?.user?.email || ''
     console.log('isAuthenticated set to:', isAuthenticated.value)
     
-    // Auto-redirect to login if not authenticated
+    // Auto-redirect based on auth state
     if (!isAuthenticated.value && router.currentRoute.value.path !== '/auth') {
       console.log('Auth state change - redirecting to /auth')
       router.push('/auth')
+    } else if (isAuthenticated.value && event === 'SIGNED_IN') {
+      // After sign in, redirect to company picker
+      console.log('User signed in - redirecting to company picker')
+      router.push('/company-picker')
     }
   })
 
@@ -137,6 +141,39 @@ const createNewCheck = () => {
   // Navigate to home page (Check Writer)
   router.push('/')
 }
+
+const getInitials = (name: string) => {
+  return name
+    .split(' ')
+    .map(word => word[0])
+    .join('')
+    .toUpperCase()
+    .substring(0, 2)
+}
+
+const getLogoUrl = (logoPath: string) => {
+  if (!logoPath) return ''
+  if (logoPath.startsWith('http')) return logoPath
+  
+  const { data } = supabase.storage
+    .from('company-logos')
+    .getPublicUrl(logoPath)
+  
+  return data.publicUrl
+}
+
+const getLastFourDigits = (accountNumber: string) => {
+  if (!accountNumber) return '0000'
+  return accountNumber.slice(-4)
+}
+
+const changeCompany = () => {
+  router.push('/company-picker')
+}
+
+const changeAccount = () => {
+  router.push('/account-picker')
+}
 </script>
 
 <template>
@@ -183,13 +220,40 @@ const createNewCheck = () => {
               <img src="/mycheckprinter.png" alt="My Check Printer" style="max-width: 300px; height: auto;" />
           </div>
           
+          <!-- Company/Account Header (shown when both are selected) -->
+          <div v-if="store.selectedCompany && store.selectedAccount" class="company-account-header mb-3">
+              <div class="company-logo-container">
+                  <img 
+                      v-if="store.selectedCompany.logo_url" 
+                      :src="getLogoUrl(store.selectedCompany.logo_url)" 
+                      :alt="store.selectedCompany.name"
+                      class="company-logo-header"
+                  />
+                  <div v-else class="company-logo-placeholder-header">
+                      {{ getInitials(store.selectedCompany.name) }}
+                  </div>
+              </div>
+              <div class="company-account-info">
+                  <h4 class="company-name-header">{{ store.selectedCompany.name }}</h4>
+                  <p class="account-name-header">{{ store.selectedAccount.name }} - •••• {{ getLastFourDigits(store.selectedAccount.accountNumber) }}</p>
+              </div>
+              <div class="company-account-actions">
+                  <button class="btn btn-outline-primary btn-sm me-2" @click="changeCompany">
+                      <i class="bi bi-building"></i> Change Company
+                  </button>
+                  <button class="btn btn-outline-primary btn-sm" @click="changeAccount">
+                      <i class="bi bi-bank"></i> Change Account
+                  </button>
+              </div>
+          </div>
+          
           <div class="d-flex justify-content-between align-items-center mb-3">
               <div class="user-info">
                   <span class="text-muted">Welcome, {{ userEmail }}</span>
                   <span v-if="store.isAdmin" class="badge bg-primary ms-2">Admin</span>
               </div>
               <div class="d-flex gap-2">
-                  <button class="btn btn-success" @click="createNewCheck">
+                  <button class="btn btn-success" @click="createNewCheck" v-if="store.selectedCompany && store.selectedAccount">
                       <i class="bi bi-plus-circle"></i> New Check
                   </button>
                   <button class="btn btn-outline-secondary" @click="handleSignOut">
@@ -198,7 +262,7 @@ const createNewCheck = () => {
               </div>
           </div>
           
-          <ul class="nav nav-tabs">
+          <ul class="nav nav-tabs" v-if="store.selectedCompany && store.selectedAccount">
               <li class="nav-item">
                   <RouterLink to="/" class="nav-link" :class="{'active': $route.path == '/'}">Check Writer</RouterLink>
               </li>
@@ -321,6 +385,74 @@ nav a:first-of-type {
 
 .user-info {
   font-size: 14px;
+}
+
+.company-account-header {
+  display: flex;
+  align-items: center;
+  padding: 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  color: white;
+  gap: 20px;
+}
+
+.company-logo-container {
+  flex-shrink: 0;
+}
+
+.company-logo-header {
+  width: 60px;
+  height: 60px;
+  object-fit: contain;
+  background: white;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.company-logo-placeholder-header {
+  width: 60px;
+  height: 60px;
+  border-radius: 8px;
+  background: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #667eea;
+}
+
+.company-account-info {
+  flex: 1;
+}
+
+.company-name-header {
+  margin: 0 0 5px 0;
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+.account-name-header {
+  margin: 0;
+  font-size: 0.95rem;
+  opacity: 0.9;
+}
+
+.company-account-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.company-account-actions .btn {
+  background: white;
+  color: #667eea;
+  border: none;
+}
+
+.company-account-actions .btn:hover {
+  background: #f7fafc;
+  color: #5568d3;
 }
 
 </style>
