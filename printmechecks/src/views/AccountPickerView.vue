@@ -256,6 +256,12 @@ onMounted(() => {
   // If no company is selected, redirect to company picker
   if (!store.selectedCompanyId) {
     router.push('/company-picker')
+    return
+  }
+  
+  // If user only has access to one account for this company, auto-select it and move to main app
+  if (store.accountsForSelectedCompany.length === 1) {
+    selectAccount(store.accountsForSelectedCompany[0].id)
   }
 })
 </script>
@@ -263,13 +269,13 @@ onMounted(() => {
 <style scoped>
 .account-picker-container {
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #ffffff;
   padding: 40px 20px;
 }
 
 .picker-header {
   text-align: center;
-  color: white;
+  color: #2d3748;
   margin-bottom: 40px;
 }
 
@@ -280,7 +286,8 @@ onMounted(() => {
   gap: 20px;
   margin-bottom: 30px;
   padding: 20px;
-  background: rgba(255, 255, 255, 0.1);
+  background: #f7fafc;
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
   max-width: 600px;
   margin-left: auto;
@@ -308,13 +315,14 @@ onMounted(() => {
   width: 60px;
   height: 60px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #f7fafc;
+  border: 2px solid #e2e8f0;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 1.5rem;
   font-weight: 700;
-  color: white;
+  color: #4a5568;
 }
 
 .company-info {
@@ -325,17 +333,19 @@ onMounted(() => {
   margin: 0 0 8px 0;
   font-size: 1.5rem;
   font-weight: 600;
+  color: #2d3748;
 }
 
 .picker-header h1 {
   font-size: 2.5rem;
   font-weight: 700;
   margin-bottom: 10px;
+  color: #2d3748;
 }
 
 .picker-header .subtitle {
   font-size: 1.1rem;
-  opacity: 0.9;
+  color: #718096;
 }
 
 .accounts-grid {
@@ -368,7 +378,8 @@ onMounted(() => {
   width: 64px;
   height: 64px;
   border-radius: 12px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #f7fafc;
+  border: 2px solid #e2e8f0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -377,7 +388,7 @@ onMounted(() => {
 
 .account-icon i {
   font-size: 2rem;
-  color: white;
+  color: #4a5568;
 }
 
 .account-info {
@@ -412,7 +423,7 @@ onMounted(() => {
 }
 
 .add-account-card:hover {
-  border-color: #667eea;
+  border-color: #0d6efd;
   background: white;
 }
 
@@ -428,7 +439,7 @@ onMounted(() => {
 
 .add-account-content i {
   font-size: 3rem;
-  color: #667eea;
+  color: #0d6efd;
 }
 
 .empty-state {

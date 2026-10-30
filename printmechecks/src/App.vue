@@ -392,9 +392,10 @@ nav a:first-of-type {
   display: flex;
   align-items: center;
   padding: 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #f7fafc;
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
-  color: white;
+  color: #2d3748;
   gap: 20px;
 }
 
@@ -416,12 +417,13 @@ nav a:first-of-type {
   height: 60px;
   border-radius: 8px;
   background: white;
+  border: 2px solid #e2e8f0;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 1.5rem;
   font-weight: 700;
-  color: #667eea;
+  color: #4a5568;
 }
 
 .company-account-info {
@@ -447,13 +449,13 @@ nav a:first-of-type {
 
 .company-account-actions .btn {
   background: white;
-  color: #667eea;
-  border: none;
+  color: #0d6efd;
+  border: 1px solid #0d6efd;
 }
 
 .company-account-actions .btn:hover {
-  background: #f7fafc;
-  color: #5568d3;
+  background: #0d6efd;
+  color: white;
 }
 
 </style>
