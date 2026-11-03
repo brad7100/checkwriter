@@ -59,7 +59,11 @@ export interface Check {
   mailToZip?: string
   isPrinted?: boolean
   printedDate?: string | null
-  status?: 'pending' | 'approved' | 'voided'
+  status?: 'pending' | 'approved' | 'rejected' | 'printed' | 'void'
+  approvedBy?: string | null
+  approvedAt?: string | null
+  voidedAt?: string | null
+  createdSource?: string
   expenseCategory?: string
   quickbooksId?: string
   quickbooksVendorId?: string
@@ -139,6 +143,9 @@ export const useAppStore = defineStore('useAppStore', () => {
 
   // Computed
   const isAdmin = computed(() => userProfile.value?.role === 'admin')
+  const canApproveChecks = computed(() => 
+    userProfile.value?.role === 'admin' || userProfile.value?.role === 'approver'
+  )
 
   // Only companies that have at least one account the user can access (or all if admin)
   const visibleCompanies = computed(() => {
@@ -698,6 +705,10 @@ export const useAppStore = defineStore('useAppStore', () => {
         is_printed: checkData.isPrinted,
         printed_date: checkData.printedDate,
         status: checkData.status || 'approved',
+        approved_by: checkData.approvedBy,
+        approved_at: checkData.approvedAt,
+        voided_at: checkData.voidedAt,
+        created_source: checkData.createdSource,
         expense_category: checkData.expenseCategory,
         quickbooks_id: checkData.quickbooksId,
         quickbooks_vendor_id: checkData.quickbooksVendorId,
@@ -750,6 +761,9 @@ export const useAppStore = defineStore('useAppStore', () => {
       if (updates.isPrinted !== undefined) updatePayload.is_printed = updates.isPrinted
       if (updates.printedDate !== undefined) updatePayload.printed_date = updates.printedDate
       if (updates.status !== undefined) updatePayload.status = updates.status
+      if (updates.approvedBy !== undefined) updatePayload.approved_by = updates.approvedBy
+      if (updates.approvedAt !== undefined) updatePayload.approved_at = updates.approvedAt
+      if (updates.voidedAt !== undefined) updatePayload.voided_at = updates.voidedAt
       if (updates.quickbooksId !== undefined) updatePayload.quickbooks_id = updates.quickbooksId
       if (updates.quickbooksVendorId !== undefined) updatePayload.quickbooks_vendor_id = updates.quickbooksVendorId
       if (updates.syncedToQuickBooks !== undefined) updatePayload.synced_to_quickbooks = updates.syncedToQuickBooks
@@ -803,6 +817,10 @@ export const useAppStore = defineStore('useAppStore', () => {
         isPrinted: c.is_printed,
         printedDate: c.printed_date,
         status: c.status || 'approved',
+        approvedBy: c.approved_by,
+        approvedAt: c.approved_at,
+        voidedAt: c.voided_at,
+        createdSource: c.created_source,
         expenseCategory: c.expense_category,
         quickbooksId: c.quickbooks_id,
         quickbooksVendorId: c.quickbooks_vendor_id,
@@ -956,7 +974,7 @@ export const useAppStore = defineStore('useAppStore', () => {
       return []
     }
     
-    // Map snake_case to camelCase and filter out voids
+    // Map snake_case to camelCase and filter out non-printable checks
     const mapped = data?.map(c => ({
       id: c.id,
       companyId: c.company_id,
@@ -984,6 +1002,10 @@ export const useAppStore = defineStore('useAppStore', () => {
       isPrinted: c.is_printed,
       printedDate: c.printed_date,
       status: c.status || 'approved',
+      approvedBy: c.approved_by,
+      approvedAt: c.approved_at,
+      voidedAt: c.voided_at,
+      createdSource: c.created_source,
       expenseCategory: c.expense_category,
       quickbooksId: c.quickbooks_id,
       quickbooksVendorId: c.quickbooks_vendor_id,
@@ -991,7 +1013,7 @@ export const useAppStore = defineStore('useAppStore', () => {
       syncedAt: c.synced_at
     })) || []
     
-    // Filter out voided checks (amount is 0 or memo is 'Void')
+    // Filter out checks that shouldn't appear in Ready to Print
     return mapped.filter(check => {
       // Parse amount (it's stored as text like '0', '0.00', '4264.38')
       const amount = parseFloat(check.amount || '0')
@@ -1002,8 +1024,8 @@ export const useAppStore = defineStore('useAppStore', () => {
       // Exclude if memo is 'Void' (case-insensitive)
       if (check.memo && check.memo.toLowerCase() === 'void') return false
       
-      // Exclude if status is 'voided'
-      if (check.status === 'voided') return false
+      // Exclude void, rejected, and printed checks
+      if (check.status === 'void' || check.status === 'rejected' || check.status === 'printed') return false
       
       return true
     })
@@ -1011,14 +1033,34 @@ export const useAppStore = defineStore('useAppStore', () => {
 
   const approveCheck = async (checkId: string) => {
     try {
+      const { data: { user } } = await supabase.auth.getUser()
+      
       const { error } = await supabase
         .from('checks')
-        .update({ status: 'approved' })
+        .update({ 
+          status: 'approved',
+          approved_by: user?.id || null,
+          approved_at: new Date().toISOString()
+        })
         .eq('id', checkId)
       
       if (error) throw error
     } catch (error) {
       console.error('Error approving check:', error)
+      throw error
+    }
+  }
+
+  const rejectCheck = async (checkId: string) => {
+    try {
+      const { error } = await supabase
+        .from('checks')
+        .update({ status: 'rejected' })
+        .eq('id', checkId)
+      
+      if (error) throw error
+    } catch (error) {
+      console.error('Error rejecting check:', error)
       throw error
     }
   }
@@ -1036,6 +1078,7 @@ export const useAppStore = defineStore('useAppStore', () => {
     authState,
     userProfile,
     isAdmin,
+    canApproveChecks,
     visibleCompanies,
     visibleBankAccounts,
     selectedCompany,
@@ -1067,6 +1110,7 @@ export const useAppStore = defineStore('useAppStore', () => {
     getDraftCheck,
     clearDraftCheck,
     getUnprintedChecks,
-    approveCheck
+    approveCheck,
+    rejectCheck
   }
 })

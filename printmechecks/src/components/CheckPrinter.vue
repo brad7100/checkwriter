@@ -140,11 +140,17 @@
                                     <td>{{ unpCheck.memo || '-' }}</td>
                                     <td>
                                         <span v-if="unpCheck.status === 'pending'" class="badge bg-warning text-dark me-2">Pending</span>
-                                        <button v-if="unpCheck.status === 'pending' && state.isAdmin" 
+                                        <button v-if="unpCheck.status === 'pending' && state.canApproveChecks" 
                                                 class="btn btn-sm btn-success me-1" 
                                                 @click="approveCheckForPrinting(unpCheck)"
                                                 title="Approve this check for printing">
-                                            <i class="bi bi-check-circle"></i> Approve
+                                            <i class="bi bi-check-circle-fill"></i> Approve
+                                        </button>
+                                        <button v-if="unpCheck.status === 'pending' && state.canApproveChecks" 
+                                                class="btn btn-sm btn-danger me-1" 
+                                                @click="rejectCheckForPrinting(unpCheck)"
+                                                title="Reject this check">
+                                            <i class="bi bi-x-circle-fill"></i> Reject
                                         </button>
                                         <button class="btn btn-sm btn-primary me-1" 
                                                 @click="loadCheckForEditing(unpCheck)"
@@ -171,9 +177,9 @@
                     <div style="margin-top: 12px;">
                         <button class="btn btn-success me-2" 
                                 @click="batchPrintUnprinted" 
-                                :disabled="unprintedChecks.length === 0 || hasPendingChecks"
-                                :title="hasPendingChecks ? 'Cannot batch print while there are pending checks. Approve them first.' : 'Print all checks in the queue'">
-                            <i class="bi bi-printer-fill"></i> Batch Print All ({{ unprintedChecks.length }})
+                                :disabled="unprintedChecks.length === 0 || approvedChecksCount === 0"
+                                :title="approvedChecksCount === 0 ? 'No approved checks to print' : `Print ${approvedChecksCount} approved check(s)`">
+                            <i class="bi bi-printer-fill"></i> Batch Print Approved ({{ approvedChecksCount }})
                         </button>
                         <button class="btn btn-outline-secondary" 
                                 @click="markSelectedAsPrinted" 
@@ -181,9 +187,9 @@
                                 title="Mark selected checks as printed without printing">
                             <i class="bi bi-check-circle-fill"></i> Mark Selected as Printed ({{ selectedCheckIds.length }})
                         </button>
-                        <div v-if="hasPendingChecks" class="alert alert-warning mt-2 mb-0" style="font-size: 13px;">
-                            <i class="bi bi-exclamation-triangle"></i> 
-                            Some checks are pending approval. Batch printing is disabled until all checks are approved.
+                        <div v-if="hasPendingChecks" class="alert alert-info mt-2 mb-0" style="font-size: 13px;">
+                            <i class="bi bi-info-circle"></i> 
+                            {{ pendingChecksCount }} check(s) pending approval. Batch print will only print approved checks.
                         </div>
                     </div>
                 </div>
@@ -312,9 +318,17 @@ const unprintedChecks = ref([])
 const selectedCheckIds = ref([])
 const selectAllChecks = ref(false)
 
-// Check if there are any pending checks in the queue
+// Check counts for batch printing
 const hasPendingChecks = computed(() => 
   unprintedChecks.value.some(c => c.status === 'pending')
+)
+
+const pendingChecksCount = computed(() => 
+  unprintedChecks.value.filter(c => c.status === 'pending').length
+)
+
+const approvedChecksCount = computed(() => 
+  unprintedChecks.value.filter(c => c.status === 'approved').length
 )
 
 const loadUnprintedChecks = async () => {
@@ -963,7 +977,21 @@ async function printCheckDirectly(unprintedCheck) {
 async function batchPrintUnprinted() {
     if (unprintedChecks.value.length === 0) return
     
-    if (!confirm(`Print ${unprintedChecks.value.length} checks?`)) return
+    // Filter to only approved checks
+    const approvedChecks = unprintedChecks.value.filter(c => c.status === 'approved')
+    const pendingChecks = unprintedChecks.value.filter(c => c.status === 'pending')
+    
+    if (approvedChecks.length === 0) {
+        alert('No approved checks to print.')
+        return
+    }
+    
+    let confirmMsg = `Print ${approvedChecks.length} approved check(s)?`
+    if (pendingChecks.length > 0) {
+        confirmMsg += `\n\n${pendingChecks.length} pending check(s) will be skipped.`
+    }
+    
+    if (!confirm(confirmMsg)) return
     
     // Open print window synchronously (before any await) to avoid iOS Safari popup blocking
     const printWindow = window.open('', '_blank', 'width=850,height=1100')
@@ -974,14 +1002,14 @@ async function batchPrintUnprinted() {
     }
     
     try {
-        // Generate combined HTML for all checks using the proper template rendering
+        // Generate combined HTML for approved checks using the proper template rendering
         let combinedHtml = '<html><head><style>@page { size: letter; margin: 0; } @media print { .page-break { page-break-after: always; } }</style></head><body>'
         
-        for (let i = 0; i < unprintedChecks.value.length; i++) {
-            const checkData = unprintedChecks.value[i]
+        for (let i = 0; i < approvedChecks.length; i++) {
+            const checkData = approvedChecks[i]
             const checkHtml = await generatePrintableCheckHtml(checkData)
             combinedHtml += checkHtml
-            if (i < unprintedChecks.value.length - 1) {
+            if (i < approvedChecks.length - 1) {
                 combinedHtml += '<div class="page-break"></div>'
             }
         }
@@ -991,8 +1019,8 @@ async function batchPrintUnprinted() {
         printWindow.document.write(combinedHtml)
         printWindow.document.close()
         
-        // Mark all as printed AFTER the print window has opened successfully
-        const updates = unprintedChecks.value.map(check => ({
+        // Mark approved checks as printed AFTER the print window has opened successfully
+        const updates = approvedChecks.map(check => ({
             ...check,
             isPrinted: true,
             printedDate: new Date().toISOString()
@@ -1011,6 +1039,13 @@ async function batchPrintUnprinted() {
         
         // Reload the unprinted queue
         await loadUnprintedChecks()
+        
+        // Show success message with information about skipped checks
+        let successMsg = `Successfully printed ${approvedChecks.length} check(s).`
+        if (pendingChecks.length > 0) {
+            successMsg += `\n\n${pendingChecks.length} pending check(s) were skipped and remain in the queue.`
+        }
+        alert(successMsg)
     } catch (error) {
         printWindow.close()
         console.error('Error batch printing checks:', error)
@@ -1075,8 +1110,8 @@ async function markSelectedAsPrinted() {
 }
 
 async function approveCheckForPrinting(unpCheck) {
-    if (!state.isAdmin) {
-        alert('Only admins can approve checks.')
+    if (!state.canApproveChecks) {
+        alert('Only approvers and admins can approve checks.')
         return
     }
     
@@ -1093,6 +1128,28 @@ async function approveCheckForPrinting(unpCheck) {
     } catch (error) {
         console.error('Error approving check:', error)
         alert(`Failed to approve check: ${error.message}`)
+    }
+}
+
+async function rejectCheckForPrinting(unpCheck) {
+    if (!state.canApproveChecks) {
+        alert('Only approvers and admins can reject checks.')
+        return
+    }
+    
+    const confirmMsg = `Reject check #${unpCheck.checkNumber} to ${unpCheck.payTo} for $${formatMoney(unpCheck.amount)}?\n\nThis check will be removed from the Ready to Print queue.`
+    if (!confirm(confirmMsg)) return
+    
+    try {
+        await state.rejectCheck(unpCheck.id)
+        
+        // Reload the unprinted queue to show updated status
+        await loadUnprintedChecks()
+        
+        alert(`Check #${unpCheck.checkNumber} rejected.`)
+    } catch (error) {
+        console.error('Error rejecting check:', error)
+        alert(`Failed to reject check: ${error.message}`)
     }
 }
 
