@@ -59,6 +59,7 @@ export interface Check {
   mailToZip?: string
   isPrinted?: boolean
   printedDate?: string | null
+  status?: 'pending' | 'approved' | 'voided'
   expenseCategory?: string
   quickbooksId?: string
   quickbooksVendorId?: string
@@ -696,6 +697,7 @@ export const useAppStore = defineStore('useAppStore', () => {
         mail_to_zip: checkData.mailToZip,
         is_printed: checkData.isPrinted,
         printed_date: checkData.printedDate,
+        status: checkData.status || 'approved',
         expense_category: checkData.expenseCategory,
         quickbooks_id: checkData.quickbooksId,
         quickbooks_vendor_id: checkData.quickbooksVendorId,
@@ -743,16 +745,19 @@ export const useAppStore = defineStore('useAppStore', () => {
 
   const updateCheck = async (id: string, updates: Partial<Check>) => {
     try {
+      const updatePayload: any = {}
+      
+      if (updates.isPrinted !== undefined) updatePayload.is_printed = updates.isPrinted
+      if (updates.printedDate !== undefined) updatePayload.printed_date = updates.printedDate
+      if (updates.status !== undefined) updatePayload.status = updates.status
+      if (updates.quickbooksId !== undefined) updatePayload.quickbooks_id = updates.quickbooksId
+      if (updates.quickbooksVendorId !== undefined) updatePayload.quickbooks_vendor_id = updates.quickbooksVendorId
+      if (updates.syncedToQuickBooks !== undefined) updatePayload.synced_to_quickbooks = updates.syncedToQuickBooks
+      if (updates.syncedAt !== undefined) updatePayload.synced_at = updates.syncedAt
+      
       const { error } = await supabase
         .from('checks')
-        .update({
-          is_printed: updates.isPrinted,
-          printed_date: updates.printedDate,
-          quickbooks_id: updates.quickbooksId,
-          quickbooks_vendor_id: updates.quickbooksVendorId,
-          synced_to_quickbooks: updates.syncedToQuickBooks,
-          synced_at: updates.syncedAt
-        })
+        .update(updatePayload)
         .eq('id', id)
       
       if (error) throw error
@@ -797,6 +802,7 @@ export const useAppStore = defineStore('useAppStore', () => {
         mailToZip: c.mail_to_zip,
         isPrinted: c.is_printed,
         printedDate: c.printed_date,
+        status: c.status || 'approved',
         expenseCategory: c.expense_category,
         quickbooksId: c.quickbooks_id,
         quickbooksVendorId: c.quickbooks_vendor_id,
@@ -977,6 +983,7 @@ export const useAppStore = defineStore('useAppStore', () => {
       mailToZip: c.mail_to_zip,
       isPrinted: c.is_printed,
       printedDate: c.printed_date,
+      status: c.status || 'approved',
       expenseCategory: c.expense_category,
       quickbooksId: c.quickbooks_id,
       quickbooksVendorId: c.quickbooks_vendor_id,
@@ -995,8 +1002,25 @@ export const useAppStore = defineStore('useAppStore', () => {
       // Exclude if memo is 'Void' (case-insensitive)
       if (check.memo && check.memo.toLowerCase() === 'void') return false
       
+      // Exclude if status is 'voided'
+      if (check.status === 'voided') return false
+      
       return true
     })
+  }
+
+  const approveCheck = async (checkId: string) => {
+    try {
+      const { error } = await supabase
+        .from('checks')
+        .update({ status: 'approved' })
+        .eq('id', checkId)
+      
+      if (error) throw error
+    } catch (error) {
+      console.error('Error approving check:', error)
+      throw error
+    }
   }
 
   return {
@@ -1042,6 +1066,7 @@ export const useAppStore = defineStore('useAppStore', () => {
     saveDraftCheck,
     getDraftCheck,
     clearDraftCheck,
-    getUnprintedChecks
+    getUnprintedChecks,
+    approveCheck
   }
 })
