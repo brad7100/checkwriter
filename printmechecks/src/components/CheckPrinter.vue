@@ -1610,10 +1610,19 @@ watch(check, async () => {
 
 // Watch for changes in selected company or account
 watch([() => state.selectedCompanyId, () => state.selectedAccountId], async () => {
+    console.log('🔄 Account selection changed - CompanyID:', state.selectedCompanyId, 'AccountID:', state.selectedAccountId)
+    
     // Reload unprinted checks when account changes
     await loadUnprintedChecks()
     
     if (state.selectedCompany && state.selectedAccount) {
+        console.log('✅ Company and Account loaded:', {
+            company: state.selectedCompany.name,
+            account: state.selectedAccount.name,
+            routingNumber: state.selectedAccount.routingNumber,
+            accountNumber: state.selectedAccount.accountNumber
+        })
+        
         check.companyId = state.selectedCompanyId
         check.accountId = state.selectedAccountId
         check.accountHolderName = state.selectedCompany.name
@@ -1626,8 +1635,11 @@ watch([() => state.selectedCompanyId, () => state.selectedAccountId], async () =
         check.bankAccountNumber = state.selectedAccount.accountNumber
         check.signature = state.selectedAccount.signature
         
+        console.log('✅ Check populated with routing number:', check.routingNumber)
+        
         // Update check number for the newly selected account (await async call)
         check.checkNumber = await getNextCheckNumber(state.selectedAccountId)
+        console.log('✅ Check number assigned:', check.checkNumber)
         
         // Load account's default template
         console.log('Selected Account:', state.selectedAccount)
@@ -1649,6 +1661,9 @@ watch([() => state.selectedCompanyId, () => state.selectedAccountId], async () =
         // Scroll again after async content settles
         setTimeout(scrollToTop, 100)
     } else {
+        console.log('⚠️ Company or Account not fully loaded yet')
+        if (!state.selectedCompany) console.log('  - Missing company')
+        if (!state.selectedAccount) console.log('  - Missing account')
         selectedTemplateId.value = 'original'
     }
 })

@@ -192,26 +192,49 @@ const changeCompany = () => {
 }
 
 const selectAccount = async (accountId: string) => {
-  store.selectedAccountId = accountId
-  store.saveData()
+  console.log('🏦 Account selected:', accountId)
   
-  // Save the last selection to the user's profile
   try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      await supabase
-        .from('profiles')
-        .update({
-          last_selected_company_id: store.selectedCompanyId,
-          last_selected_account_id: accountId
-        })
-        .eq('id', user.id)
+    // Find the account details
+    const selectedAccount = store.bankAccounts.find(a => a.id === accountId)
+    console.log('📋 Account details:', {
+      id: selectedAccount?.id,
+      name: selectedAccount?.name,
+      routingNumber: selectedAccount?.routingNumber,
+      accountNumber: selectedAccount?.accountNumber
+    })
+    
+    // Set in store
+    store.selectedAccountId = accountId
+    console.log('✅ Store selectedAccountId set to:', store.selectedAccountId)
+    
+    // Save to localStorage
+    store.saveData()
+    console.log('✅ Data saved to localStorage')
+    
+    // Save the last selection to the user's profile
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase
+          .from('profiles')
+          .update({
+            last_selected_company_id: store.selectedCompanyId,
+            last_selected_account_id: accountId
+          })
+          .eq('id', user.id)
+        console.log('✅ Selection saved to user profile')
+      }
+    } catch (error) {
+      console.error('⚠️ Error saving last selection to profile:', error)
     }
+    
+    console.log('🚀 Redirecting to home...')
+    router.push('/')
   } catch (error) {
-    console.error('Error saving last selection:', error)
+    console.error('❌ Error in selectAccount:', error)
+    alert('Failed to select account. Please try again.')
   }
-  
-  router.push('/')
 }
 
 const saveAccount = async () => {
@@ -276,14 +299,21 @@ const closeAddAccountModal = () => {
 }
 
 onMounted(() => {
+  console.log('🏦 AccountPickerView mounted')
+  console.log('Selected Company ID:', store.selectedCompanyId)
+  console.log('Available accounts:', store.accountsForSelectedCompany.length)
+  console.log('Accounts:', store.accountsForSelectedCompany.map(a => ({ id: a.id, name: a.name, routing: a.routingNumber })))
+  
   // If no company is selected, redirect to company picker
   if (!store.selectedCompanyId) {
+    console.log('⚠️ No company selected, redirecting to company picker')
     router.push('/company-picker')
     return
   }
   
   // If user only has access to one account for this company, auto-select it and move to main app
   if (store.accountsForSelectedCompany.length === 1) {
+    console.log('ℹ️ Only one account available, auto-selecting:', store.accountsForSelectedCompany[0].name)
     selectAccount(store.accountsForSelectedCompany[0].id)
   }
 })
