@@ -139,6 +139,19 @@
                                     <td>${{ formatMoney(unpCheck.amount) }}</td>
                                     <td>{{ unpCheck.memo || '-' }}</td>
                                     <td>
+                                        <span v-if="unpCheck.status === 'pending'" class="badge bg-warning text-dark me-2">Pending</span>
+                                        <button v-if="unpCheck.status === 'pending' && state.canApproveChecks" 
+                                                class="btn btn-sm btn-success me-1" 
+                                                @click="approveCheckForPrinting(unpCheck)"
+                                                title="Approve this check for printing">
+                                            <i class="bi bi-check-circle-fill"></i> Approve
+                                        </button>
+                                        <button v-if="unpCheck.status === 'pending' && state.canApproveChecks" 
+                                                class="btn btn-sm btn-danger me-1" 
+                                                @click="rejectCheckForPrinting(unpCheck)"
+                                                title="Reject this check">
+                                            <i class="bi bi-x-circle-fill"></i> Reject
+                                        </button>
                                         <button class="btn btn-sm btn-primary me-1" 
                                                 @click="loadCheckForEditing(unpCheck)"
                                                 title="Edit and print">
@@ -146,12 +159,14 @@
                                         </button>
                                         <button class="btn btn-sm btn-success me-1" 
                                                 @click="printCheckDirectly(unpCheck)"
-                                                title="Print as-is">
+                                                :disabled="unpCheck.status === 'pending'"
+                                                :title="unpCheck.status === 'pending' ? 'Check must be approved before printing' : 'Print as-is'">
                                             <i class="bi bi-printer"></i> Print
                                         </button>
                                         <button class="btn btn-sm btn-outline-secondary" 
                                                 @click="markAsPrinted(unpCheck)"
-                                                title="Mark as printed without printing">
+                                                :disabled="unpCheck.status === 'pending'"
+                                                :title="unpCheck.status === 'pending' ? 'Check must be approved before marking as printed' : 'Mark as printed without printing'">
                                             <i class="bi bi-check-circle"></i> Mark Printed
                                         </button>
                                     </td>
@@ -160,8 +175,11 @@
                         </table>
                     </div>
                     <div style="margin-top: 12px;">
-                        <button class="btn btn-success me-2" @click="batchPrintUnprinted" :disabled="unprintedChecks.length === 0">
-                            <i class="bi bi-printer-fill"></i> Batch Print All ({{ unprintedChecks.length }})
+                        <button class="btn btn-success me-2" 
+                                @click="batchPrintUnprinted" 
+                                :disabled="unprintedChecks.length === 0 || approvedChecksCount === 0"
+                                :title="approvedChecksCount === 0 ? 'No approved checks to print' : `Print ${approvedChecksCount} approved check(s)`">
+                            <i class="bi bi-printer-fill"></i> Batch Print Approved ({{ approvedChecksCount }})
                         </button>
                         <button class="btn btn-outline-secondary" 
                                 @click="markSelectedAsPrinted" 
@@ -169,6 +187,10 @@
                                 title="Mark selected checks as printed without printing">
                             <i class="bi bi-check-circle-fill"></i> Mark Selected as Printed ({{ selectedCheckIds.length }})
                         </button>
+                        <div v-if="hasPendingChecks" class="alert alert-info mt-2 mb-0" style="font-size: 13px;">
+                            <i class="bi bi-info-circle"></i> 
+                            {{ pendingChecksCount }} check(s) pending approval. Batch print will only print approved checks.
+                        </div>
                     </div>
                 </div>
             </div>
@@ -295,6 +317,19 @@ const hasValidSelectedAccount = computed(() =>
 const unprintedChecks = ref([])
 const selectedCheckIds = ref([])
 const selectAllChecks = ref(false)
+
+// Check counts for batch printing
+const hasPendingChecks = computed(() => 
+  unprintedChecks.value.some(c => c.status === 'pending')
+)
+
+const pendingChecksCount = computed(() => 
+  unprintedChecks.value.filter(c => c.status === 'pending').length
+)
+
+const approvedChecksCount = computed(() => 
+  unprintedChecks.value.filter(c => c.status === 'approved').length
+)
 
 const loadUnprintedChecks = async () => {
   if (state.selectedAccountId) {
@@ -620,24 +655,42 @@ const toWords: (denom: number | string) => string = (denom) => {
 }
 
 async function printCheck () {
+    // Validate that company and account are selected
+    if (!state.selectedCompanyId || !state.selectedAccountId) {
+        alert('Please select a company and bank account before printing.')
+        return
+    }
+    
+    // Validate check data
+    if (!check.companyId || !check.accountId) {
+        alert('Check data is incomplete. Please refresh the page and select a company and account.')
+        return
+    }
+    
     // Always save the check first (create or update)
-    if (check.id) {
-        // Update existing check and mark as printed
-        check.isPrinted = true
-        check.printedDate = new Date().toISOString()
-        
-        await state.updateCheck(check.id, {
-            ...check,
-            isPrinted: true,
-            printedDate: check.printedDate
-        })
-    } else {
-        // Create new check and mark as printed
-        check.isPrinted = true
-        check.printedDate = new Date().toISOString()
-        
-        const savedCheck = await state.saveCheck({...check})
-        check.id = savedCheck.id
+    try {
+        if (check.id) {
+            // Update existing check and mark as printed
+            check.isPrinted = true
+            check.printedDate = new Date().toISOString()
+            
+            await state.updateCheck(check.id, {
+                ...check,
+                isPrinted: true,
+                printedDate: check.printedDate
+            })
+        } else {
+            // Create new check and mark as printed
+            check.isPrinted = true
+            check.printedDate = new Date().toISOString()
+            
+            const savedCheck = await state.saveCheck({...check})
+            check.id = savedCheck.id
+        }
+    } catch (error) {
+        console.error('Error saving check:', error)
+        alert(`Failed to save check: ${error.message || 'Unknown error'}`)
+        return
     }
     
     // Clear draft after successful print
@@ -866,24 +919,41 @@ async function printCheck () {
 }
 
 async function saveToHistory () {
-    // Mark as unprinted (only when saving without printing)
-    check.isPrinted = false
-    check.printedDate = null
-    
-    // Save to Supabase
-    const savedCheck = await state.saveCheck({...check}) // Clone to avoid reference issues
-    
-    // Update the local check with the saved ID
-    if (!check.id) {
-        check.id = savedCheck.id
+    // Validate that company and account are selected
+    if (!state.selectedCompanyId || !state.selectedAccountId) {
+        alert('Please select a company and bank account before saving.')
+        return
     }
     
-    // Clear draft after successful save
-    if (state.selectedAccountId) {
-        state.clearDraftCheck(state.selectedAccountId)
+    // Validate check data
+    if (!check.companyId || !check.accountId) {
+        alert('Check data is incomplete. Please refresh the page and select a company and account.')
+        return
     }
     
-    alert('Check saved successfully!')
+    try {
+        // Mark as unprinted (only when saving without printing)
+        check.isPrinted = false
+        check.printedDate = null
+        
+        // Save to Supabase
+        const savedCheck = await state.saveCheck({...check}) // Clone to avoid reference issues
+        
+        // Update the local check with the saved ID
+        if (!check.id) {
+            check.id = savedCheck.id
+        }
+        
+        // Clear draft after successful save
+        if (state.selectedAccountId) {
+            state.clearDraftCheck(state.selectedAccountId)
+        }
+        
+        alert('Check saved successfully!')
+    } catch (error) {
+        console.error('Error saving check:', error)
+        alert(`Failed to save check: ${error.message || 'Unknown error'}`)
+    }
 }
 
 // Ready-to-Print queue functions
@@ -904,85 +974,120 @@ async function printCheckDirectly(unprintedCheck) {
     // Print the check as-is without loading into editor
     const checkToUse = { ...unprintedCheck }
     
-    // Mark as printed
-    checkToUse.isPrinted = true
-    checkToUse.printedDate = new Date().toISOString()
+    // Open print window synchronously (before any await) to avoid iOS Safari popup blocking
+    const printWindow = window.open('', '_blank', 'width=850,height=1100')
     
-    await state.updateCheck(checkToUse.id, checkToUse)
-    
-    // Print logic (simplified version of printCheck)
-    if (isPreprinted.value) {
-        const preprintedTemplate = state.customLayouts.find(layout => layout.name === 'preprinted')
-        if (!preprintedTemplate) {
-            alert('Preprinted template not found.')
-            return
-        }
-        const printWindow = window.open('', '_blank')
-        const checkHtml = await generateCheckHtml(checkToUse, preprintedTemplate)
-        printWindow.document.write(checkHtml)
-        printWindow.document.close()
-        printWindow.onload = () => {
-            printWindow.print()
-            printWindow.close()
-        }
-    } else {
-        const printWindow = window.open('', '_blank')
-        const checkHtml = await generateCheckHtml(checkToUse, currentTemplate.value)
-        printWindow.document.write(checkHtml)
-        printWindow.document.close()
-        printWindow.onload = () => {
-            printWindow.print()
-            printWindow.close()
-        }
+    if (!printWindow) {
+        alert('Pop-up blocked! Please allow pop-ups for this site to print checks.')
+        return
     }
     
-    // Reload the unprinted queue
-    await loadUnprintedChecks()
-    alert('Check printed successfully!')
+    try {
+        // Generate the proper check HTML using the same template rendering as single print
+        const checkHtml = await generatePrintableCheckHtml(checkToUse)
+        printWindow.document.write(checkHtml)
+        printWindow.document.close()
+        
+        // Mark as printed AFTER the print window has opened successfully
+        checkToUse.isPrinted = true
+        checkToUse.printedDate = new Date().toISOString()
+        
+        await state.updateCheck(checkToUse.id, checkToUse)
+        
+        // Set up print handler
+        printWindow.onload = () => {
+            printWindow.print()
+            printWindow.close()
+        }
+        
+        // Reload the unprinted queue
+        await loadUnprintedChecks()
+    } catch (error) {
+        printWindow.close()
+        console.error('Error printing check:', error)
+        alert(`Failed to print check: ${error.message || 'Unknown error'}`)
+    }
 }
 
 async function batchPrintUnprinted() {
     if (unprintedChecks.value.length === 0) return
     
-    if (!confirm(`Print ${unprintedChecks.value.length} checks?`)) return
+    // Filter to only approved checks
+    const approvedChecks = unprintedChecks.value.filter(c => c.status === 'approved')
+    const pendingChecks = unprintedChecks.value.filter(c => c.status === 'pending')
     
-    // Mark all as printed
-    const updates = unprintedChecks.value.map(check => ({
-        ...check,
-        isPrinted: true,
-        printedDate: new Date().toISOString()
-    }))
-    
-    // Update all in database
-    for (const checkToUpdate of updates) {
-        await state.updateCheck(checkToUpdate.id, checkToUpdate)
+    if (approvedChecks.length === 0) {
+        alert('No approved checks to print.')
+        return
     }
     
-    // Generate combined HTML for all checks
-    const printWindow = window.open('', '_blank')
-    let combinedHtml = '<html><head><style>@page { size: letter; margin: 0; } @media print { .page-break { page-break-after: always; } }</style></head><body>'
+    let confirmMsg = `Print ${approvedChecks.length} approved check(s)?`
+    if (pendingChecks.length > 0) {
+        confirmMsg += `\n\n${pendingChecks.length} pending check(s) will be skipped.`
+    }
     
-    for (let i = 0; i < updates.length; i++) {
-        const checkData = updates[i]
-        const checkHtml = await generateCheckHtml(checkData, currentTemplate.value)
-        combinedHtml += checkHtml
-        if (i < updates.length - 1) {
-            combinedHtml += '<div class="page-break"></div>'
+    if (!confirm(confirmMsg)) return
+    
+    // Open print window synchronously (before any await) to avoid iOS Safari popup blocking
+    const printWindow = window.open('', '_blank', 'width=850,height=1100')
+    
+    if (!printWindow) {
+        alert('Pop-up blocked! Please allow pop-ups for this site to print checks.')
+        return
+    }
+    
+    try {
+        // Generate combined HTML for approved checks using the proper template rendering
+        let combinedHtml = '<html><head><style>@page { size: letter; margin: 0; } @media print { .page-break { page-break-after: always; } }</style></head><body>'
+        
+        for (let i = 0; i < approvedChecks.length; i++) {
+            const checkData = approvedChecks[i]
+            const checkHtml = await generatePrintableCheckHtml(checkData)
+            combinedHtml += checkHtml
+            if (i < approvedChecks.length - 1) {
+                combinedHtml += '<div class="page-break"></div>'
+            }
         }
-    }
-    
-    combinedHtml += '</body></html>'
-    
-    printWindow.document.write(combinedHtml)
-    printWindow.document.close()
-    printWindow.onload = () => {
-        printWindow.print()
+        
+        combinedHtml += '</body></html>'
+        
+        printWindow.document.write(combinedHtml)
+        printWindow.document.close()
+        
+        // Mark approved checks as printed AFTER the print window has opened successfully
+        const updates = approvedChecks.map(check => ({
+            ...check,
+            isPrinted: true,
+            printedDate: new Date().toISOString()
+        }))
+        
+        // Update all in database
+        for (const checkToUpdate of updates) {
+            await state.updateCheck(checkToUpdate.id, checkToUpdate)
+        }
+        
+        // Set up print handler
+        printWindow.onload = () => {
+            printWindow.print()
+            printWindow.close()
+        }
+        
+        // Reload the unprinted queue
+        await loadUnprintedChecks()
+        
+        // Show success message with information about skipped checks
+        let successMsg = `Successfully printed ${approvedChecks.length} check(s).`
+        if (pendingChecks.length > 0) {
+            successMsg += `\n\n${pendingChecks.length} pending check(s) were skipped and remain in the queue.`
+        }
+        alert(successMsg)
+    } catch (error) {
         printWindow.close()
+        console.error('Error batch printing checks:', error)
+        alert(`Failed to batch print checks: ${error.message || 'Unknown error'}`)
+        // Reload the queue anyway to show current state
+        await loadUnprintedChecks()
     }
-    
-    // Reload the unprinted queue
-    await loadUnprintedChecks()
-    alert(`Batch printed ${updates.length} checks successfully!`)
 }
 
 async function markAsPrinted(unprintedCheck) {
@@ -1039,32 +1144,273 @@ async function markSelectedAsPrinted() {
     }
 }
 
-// Helper to generate check HTML for printing
-async function generateCheckHtml(checkData, template) {
-    // Simplified HTML generation - you may need to adjust based on your template rendering
+async function approveCheckForPrinting(unpCheck) {
+    if (!state.canApproveChecks) {
+        alert('Only approvers and admins can approve checks.')
+        return
+    }
+    
+    const confirmMsg = `Approve check #${unpCheck.checkNumber} to ${unpCheck.payTo} for $${formatMoney(unpCheck.amount)}?`
+    if (!confirm(confirmMsg)) return
+    
+    try {
+        await state.approveCheck(unpCheck.id)
+        
+        // Reload the unprinted queue to show updated status
+        await loadUnprintedChecks()
+        
+        alert(`Check #${unpCheck.checkNumber} approved successfully!`)
+    } catch (error) {
+        console.error('Error approving check:', error)
+        alert(`Failed to approve check: ${error.message}`)
+    }
+}
+
+async function rejectCheckForPrinting(unpCheck) {
+    if (!state.canApproveChecks) {
+        alert('Only approvers and admins can reject checks.')
+        return
+    }
+    
+    const confirmMsg = `Reject check #${unpCheck.checkNumber} to ${unpCheck.payTo} for $${formatMoney(unpCheck.amount)}?\n\nThis check will be removed from the Ready to Print queue.`
+    if (!confirm(confirmMsg)) return
+    
+    try {
+        await state.rejectCheck(unpCheck.id)
+        
+        // Reload the unprinted queue to show updated status
+        await loadUnprintedChecks()
+        
+        alert(`Check #${unpCheck.checkNumber} rejected.`)
+    } catch (error) {
+        console.error('Error rejecting check:', error)
+        alert(`Failed to reject check: ${error.message}`)
+    }
+}
+
+// Helper to generate proper check HTML for printing using the same template rendering as single print
+async function generatePrintableCheckHtml(checkData) {
+    // This function generates HTML that matches the exact format of single-check printing
+    // It uses the same template logic, positioning, fonts, MICR line, etc.
+    
     const toWords = new ToWords({
         localeCode: 'en-US',
-        converterOptions: { currency: true }
+        converterOptions: {
+            currency: true,
+            ignoreDecimal: false,
+            ignoreZeroCurrency: false,
+            doNotAddOnly: true,
+        }
     })
-    const amountWords = toWords.convert(parseFloat(checkData.amount) || 0)
     
-    return `
-        <div style="width: 850px; height: 350px; position: relative; border: 1px solid #ccc; margin: 20px; padding: 20px;">
-            <div style="position: absolute; top: 40px; left: 60px; font-weight: bold;">${checkData.accountHolderName}</div>
+    const amount = Number(checkData.amount || 0)
+    const dollars = Math.floor(amount)
+    const cents = Math.round((amount - dollars) * 100)
+    const dollarsWords = dollars === 0 ? 'Zero' : toWords.convert(dollars)
+    const centsStr = cents.toString().padStart(2, '0')
+    const amountWords = `*** ${dollarsWords} and ${centsStr}/100 Dollars ***`
+    
+    // Get the current template (same logic as in the component)
+    let templateToUse = null
+    if (isPreprinted.value) {
+        templateToUse = state.customLayouts.find(layout => layout.name === 'preprinted')
+    } else if (selectedTemplateId.value !== 'original') {
+        templateToUse = state.customLayouts.find(layout => layout.id === selectedTemplateId.value)
+    }
+    
+    // Helper function to get field content for a check
+    const getFieldContentForCheck = (field, checkData) => {
+        if (!field.dataBinding) {
+            return field.text || ''
+        }
+        
+        switch (field.dataBinding) {
+            case 'accountHolderName':
+                return checkData.accountHolderName || state.selectedCompany?.name || ''
+            case 'accountHolderAddress':
+                return checkData.accountHolderAddress || state.selectedCompany?.address || ''
+            case 'accountHolderCity':
+                return checkData.accountHolderCity || state.selectedCompany?.city || ''
+            case 'accountHolderState':
+                return checkData.accountHolderState || state.selectedCompany?.state || ''
+            case 'accountHolderZip':
+                return checkData.accountHolderZip || state.selectedCompany?.zip || ''
+            case 'accountHolderCityStateZip':
+            case 'accountHolderCityState':
+                return `${checkData.accountHolderCity || state.selectedCompany?.city || ''}, ${checkData.accountHolderState || state.selectedCompany?.state || ''} ${checkData.accountHolderZip || state.selectedCompany?.zip || ''}`
+            case 'checkNumber':
+                return checkData.checkNumber
+            case 'date':
+                return checkData.date
+            case 'amount':
+                return '$ ' + formatMoney(checkData.amount)
+            case 'amountWords':
+                return amountWords
+            case 'payTo':
+                return checkData.payTo
+            case 'bankName':
+                return checkData.bankName
+            case 'memo':
+                return checkData.memo || ''
+            case 'signature':
+                return checkData.signature
+            case 'routingNumber':
+                return checkData.routingNumber
+            case 'mailToAddress':
+            case 'payeeAddress':
+                return checkData.mailToAddress || ''
+            case 'mailToCity':
+                return checkData.mailToCity || ''
+            case 'mailToState':
+                return checkData.mailToState || ''
+            case 'mailToZip':
+                return checkData.mailToZip || ''
+            case 'mailToCityStateZip':
+            case 'payeeCityStateZip':
+                return `${checkData.mailToCity || ''}, ${checkData.mailToState || ''} ${checkData.mailToZip || ''}`.trim()
+            default:
+                return ''
+        }
+    }
+    
+    let checkContent = ''
+    
+    // If using a custom template, render fields and drawing elements
+    if (templateToUse && templateToUse.fields) {
+        templateToUse.fields.forEach(field => {
+            // Skip MICR, routing, and check number if preprinted
+            if (isPreprinted.value && (field.id === 'micr-line' || field.id === 'routingNumber' || field.id === 'checkNumber')) {
+                return
+            }
+            
+            const content = getFieldContentForCheck(field, checkData)
+            const style = `position: absolute; left: ${field.x}px; top: ${field.y}px; width: ${field.width}px; height: ${field.height}px; font-family: ${field.fontFamily}; font-size: ${field.fontSize}px; font-weight: ${field.fontWeight ? 'bold' : 'normal'}; font-style: ${field.fontStyle ? 'italic' : 'normal'}; color: ${field.color}; text-align: ${field.textAlign || 'left'}; white-space: pre-line;`
+            checkContent += `<div style="${style}">${content}</div>`
+        })
+        
+        if (templateToUse.drawingElements) {
+            templateToUse.drawingElements.forEach(element => {
+                let style = `position: absolute; left: ${element.x}px; top: ${element.y}px; width: ${element.width}px; height: ${element.height}px;`
+                
+                if (element.type === 'line') {
+                    style += `border: none; border-top: ${element.strokeWidth || 2}px solid ${element.strokeColor || '#000'}; background: transparent;`
+                } else {
+                    style += `border: ${element.strokeWidth}px solid ${element.strokeColor}; background-color: ${element.fillColor || 'transparent'};`
+                    if (element.rotation) {
+                        style += `transform: rotate(${element.rotation}deg); transform-origin: center;`
+                    }
+                }
+                
+                checkContent += `<div style="${style}"></div>`
+            })
+        }
+    } else {
+        // Use original template layout
+        checkContent = `
+            <div style="position: absolute; top: 40px; left: 60px; font-size: 20px; font-weight: bold;">${checkData.accountHolderName}</div>
             <div style="position: absolute; top: 70px; left: 60px;">
                 ${checkData.accountHolderAddress}<br>
                 ${checkData.accountHolderCity}, ${checkData.accountHolderState} ${checkData.accountHolderZip}
             </div>
-            <div style="position: absolute; top: 40px; right: 60px; font-weight: bold;">Check #${checkData.checkNumber}</div>
-            <div style="position: absolute; top: 80px; right: 100px;">Date: ${checkData.date}</div>
-            <div style="position: absolute; top: 130px; left: 100px; font-size: 18px;">Pay to the order of: <strong>${checkData.payTo}</strong></div>
-            <div style="position: absolute; top: 130px; right: 60px; border: 2px solid #000; padding: 5px;">$${formatMoney(checkData.amount)}</div>
-            <div style="position: absolute; top: 170px; left: 100px; font-style: italic;">${amountWords}</div>
-            <div style="position: absolute; top: 210px; left: 100px;">Memo: ${checkData.memo}</div>
-            <div style="position: absolute; bottom: 40px; right: 100px; font-family: cursive;">${checkData.signature}</div>
-            <div style="position: absolute; bottom: 20px; left: 60px; font-size: 10px;">
-                ⑆${checkData.routingNumber}⑆ ${checkData.bankAccountNumber} ${checkData.checkNumber}
+            <div style="position: absolute; top: 40px; left: 1060px; font-size: 20px; font-weight: bold;">${checkData.checkNumber}</div>
+            <div style="position: absolute; top: 80px; left: 850px; font-size: 20px; font-weight: bold;">${checkData.date}</div>
+            <div style="position: absolute; top: 90px; left: 760px;">Date: _____________________ </div>
+            <div style="position: absolute; top: 175px; left: 950px; width: 225px; height: 40px; border: 1px solid #c7c7c7; background-color: white;"></div>
+            <div style="position: absolute; top: 182px; left: 970px; font-size: 20px; font-weight: bold;">$ ${formatMoney(checkData.amount)}</div>
+            <div style="position: absolute; top: 180px; left: 180px; font-size: 20px; font-weight: bold;">${checkData.payTo}</div>
+            <div style="position: absolute; top: 170px; left: 60px;">Pay to the <br>Order of</div>
+            <div style="position: absolute; top: 240px; left: 100px; text-transform: capitalize;">${amountWords}</div>
+            <div style="position: absolute; top: 300px; left: 60px; font-size: 20px; font-weight: bold;">${checkData.bankName}</div>
+            <div style="position: absolute; top: 367px; left: 120px; font-family: Caveat, cursive; font-size: 30px; max-width: 350px;">${checkData.memo || ''}</div>
+            <div style="position: absolute; top: 390px; left: 60px;">Memo: ____________________________________</div>
+            <div style="position: absolute; top: 366px; left: 770px; font-family: Caveat, cursive; font-size: 40px; transform: rotate(-2deg);">${checkData.signature}</div>
+            <div style="position: absolute; top: 390px; left: 750px;">_________________________________________________</div>
+        `
+    }
+    
+    // Add MICR line if not preprinted
+    let micrLine = ''
+    if (!isPreprinted.value) {
+        micrLine = `<div style="position: absolute; top: 420px; left: 147px; font-family: 'banking', monospace; font-size: 37px;">a${checkData.routingNumber}a ${checkData.bankAccountNumber}c ${checkData.checkNumber}</div>`
+    }
+    
+    // Generate stub HTML
+    const stubContent = currentStubTemplate.value 
+        ? generateStubHtmlForCheck(checkData, currentStubTemplate.value)
+        : generateDefaultStubHtml(checkData)
+    
+    // Return complete HTML document
+    return `
+        <div style="width: 1200px; min-height: 1480px; position: relative; background: white;">
+            <div style="position: relative; width: 100%; height: 410px;">
+                ${checkContent}
+                ${micrLine}
             </div>
+            ${stubContent}
+        </div>
+    `
+}
+
+// Helper to generate stub HTML for custom template
+function generateStubHtmlForCheck(checkData, template) {
+    let stub1Content = ''
+    let stub2Content = ''
+    
+    if (template.fields) {
+        template.fields.forEach(field => {
+            const content = field.text || '' // Stub templates usually use static text
+            const style = `position: absolute; left: ${field.x}px; top: ${field.y}px; width: ${field.width}px; height: ${field.height}px; font-family: ${field.fontFamily}; font-size: ${field.fontSize}px; font-weight: ${field.fontWeight ? 'bold' : 'normal'}; color: ${field.color};`
+            stub1Content += `<div style="${style}">${content}</div>`
+            stub2Content += `<div style="${style}">${content}</div>`
+        })
+    }
+    
+    return `
+        <div style="position: absolute; top: 525px; left: 150px; width: 612px; height: 300px; border: 1px solid #ccc; background: white; padding: 20px; transform: scale(1.5); transform-origin: top left;">
+            ${stub1Content}
+        </div>
+        <div style="position: absolute; top: 1000px; left: 150px; width: 612px; height: 300px; border: 1px solid #ccc; background: white; padding: 20px; transform: scale(1.5); transform-origin: top left;">
+            ${stub2Content}
+        </div>
+    `
+}
+
+// Helper to generate default stub HTML
+function generateDefaultStubHtml(checkData) {
+    const stub1 = `
+        <div style="font-family: Arial, sans-serif; font-size: 12px;">
+            <div style="font-weight: bold; font-size: 14px; margin-bottom: 10px; border-bottom: 1px solid #ccc; padding-bottom: 5px;">Check Stub - Payee Copy</div>
+            <div><strong>Company:</strong> ${state.selectedCompany?.name || 'N/A'}</div>
+            <div><strong>Account:</strong> ${state.selectedAccount?.name || 'N/A'}</div>
+            <div><strong>Check #:</strong> ${checkData.checkNumber}</div>
+            <div><strong>Date:</strong> ${checkData.date}</div>
+            <div><strong>Pay to:</strong> ${checkData.payTo}</div>
+            <div><strong>Amount:</strong> $${formatMoney(checkData.amount)}</div>
+            <div><strong>Memo:</strong> ${checkData.memo || ''}</div>
+        </div>
+    `
+    
+    const stub2 = `
+        <div style="font-family: Arial, sans-serif; font-size: 12px;">
+            <div style="font-weight: bold; font-size: 14px; margin-bottom: 10px; border-bottom: 1px solid #ccc; padding-bottom: 5px;">Check Stub - Bank Copy</div>
+            <div><strong>Company:</strong> ${state.selectedCompany?.name || 'N/A'}</div>
+            <div><strong>Account:</strong> ${state.selectedAccount?.name || 'N/A'}</div>
+            <div><strong>Check #:</strong> ${checkData.checkNumber}</div>
+            <div><strong>Date:</strong> ${checkData.date}</div>
+            <div><strong>Pay to:</strong> ${checkData.payTo}</div>
+            <div><strong>Amount:</strong> $${formatMoney(checkData.amount)}</div>
+            <div><strong>Memo:</strong> ${checkData.memo || ''}</div>
+            <div><strong>Routing:</strong> ${checkData.routingNumber}</div>
+            <div><strong>Account #:</strong> ${checkData.bankAccountNumber}</div>
+        </div>
+    `
+    
+    return `
+        <div style="position: absolute; top: 525px; left: 150px; width: 612px; height: 300px; border: 1px solid #ccc; background: white; padding: 20px; transform: scale(1.5); transform-origin: top left; box-sizing: border-box;">
+            ${stub1}
+        </div>
+        <div style="position: absolute; top: 1000px; left: 150px; width: 612px; height: 300px; border: 1px solid #ccc; background: white; padding: 20px; transform: scale(1.5); transform-origin: top left; box-sizing: border-box;">
+            ${stub2}
         </div>
     `
 }
@@ -1143,14 +1489,14 @@ async function genNewCheck () {
 
 const check = reactive({
     id: '',
-    companyId: '',
-    accountId: '',
+    companyId: state.selectedCompanyId || '',
+    accountId: state.selectedAccountId || '',
     accountHolderName: '',
     accountHolderAddress: '',
     accountHolderCity: '',
     accountHolderState: '',
     accountHolderZip: '',
-    checkNumber: '100',
+    checkNumber: '1000',
     date: new Date().toLocaleDateString(),
     bankName: '',
     amount: '0.00',
@@ -1226,9 +1572,17 @@ onMounted(async () => {
             Object.assign(check, newCheck)
         }
     } else {
-        // Fallback: Generate a new check
+        // Fallback: Generate a new check (will have empty IDs until account is selected)
         const newCheck = await genNewCheck()
         Object.assign(check, newCheck)
+    }
+    
+    // Ensure companyId and accountId are set if company/account are selected
+    if (state.selectedCompanyId && !check.companyId) {
+        check.companyId = state.selectedCompanyId
+    }
+    if (state.selectedAccountId && !check.accountId) {
+        check.accountId = state.selectedAccountId
     }
     
     // Scroll to top after nextTick (after initial render)

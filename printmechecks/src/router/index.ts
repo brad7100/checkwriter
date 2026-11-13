@@ -73,19 +73,37 @@ const router = createRouter({
 // Navigation guard: require auth, redirect invite users to set password, admin-only routes, company/account selection
 router.beforeEach((to, from, next) => {
   const store = useAppStore()
+  const isAuth = to.name === 'auth'
   const isSetPassword = to.name === 'set-password'
   const isCompanyPicker = to.name === 'company-picker'
   const isAccountPicker = to.name === 'account-picker'
 
+  // Check if route requires authentication
   if (to.meta.requiresAuth) {
+    // If not authenticated and not already loading, redirect to login
+    if (!store.authState.session && !store.isLoading) {
+      console.log('Not authenticated, redirecting to /auth')
+      next({ name: 'auth' })
+      return
+    }
+    
+    // If authenticated but must set password, redirect to set-password
     if (store.userProfile?.must_set_password && !isSetPassword) {
       next({ name: 'set-password' })
       return
     }
+    
+    // If on set-password but don't need to set password, redirect to company picker
     if (isSetPassword && !store.userProfile?.must_set_password) {
       next({ name: 'company-picker' })
       return
     }
+  }
+  
+  // If already authenticated and trying to access auth page, redirect to company picker
+  if (isAuth && store.authState.session) {
+    next({ name: 'company-picker' })
+    return
   }
   
   // Check if company selection is required
@@ -101,9 +119,10 @@ router.beforeEach((to, from, next) => {
     }
   }
   
+  // Check if admin access is required
   if (to.meta.requiresAdmin) {
     if (!store.userProfile) {
-      next({ name: 'company-picker' })
+      next({ name: 'auth' })
       return
     }
     if (store.userProfile.role !== 'admin') {
@@ -111,6 +130,7 @@ router.beforeEach((to, from, next) => {
       return
     }
   }
+  
   next()
 })
 
