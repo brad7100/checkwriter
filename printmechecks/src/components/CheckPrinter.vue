@@ -655,24 +655,42 @@ const toWords: (denom: number | string) => string = (denom) => {
 }
 
 async function printCheck () {
+    // Validate that company and account are selected
+    if (!state.selectedCompanyId || !state.selectedAccountId) {
+        alert('Please select a company and bank account before printing.')
+        return
+    }
+    
+    // Validate check data
+    if (!check.companyId || !check.accountId) {
+        alert('Check data is incomplete. Please refresh the page and select a company and account.')
+        return
+    }
+    
     // Always save the check first (create or update)
-    if (check.id) {
-        // Update existing check and mark as printed
-        check.isPrinted = true
-        check.printedDate = new Date().toISOString()
-        
-        await state.updateCheck(check.id, {
-            ...check,
-            isPrinted: true,
-            printedDate: check.printedDate
-        })
-    } else {
-        // Create new check and mark as printed
-        check.isPrinted = true
-        check.printedDate = new Date().toISOString()
-        
-        const savedCheck = await state.saveCheck({...check})
-        check.id = savedCheck.id
+    try {
+        if (check.id) {
+            // Update existing check and mark as printed
+            check.isPrinted = true
+            check.printedDate = new Date().toISOString()
+            
+            await state.updateCheck(check.id, {
+                ...check,
+                isPrinted: true,
+                printedDate: check.printedDate
+            })
+        } else {
+            // Create new check and mark as printed
+            check.isPrinted = true
+            check.printedDate = new Date().toISOString()
+            
+            const savedCheck = await state.saveCheck({...check})
+            check.id = savedCheck.id
+        }
+    } catch (error) {
+        console.error('Error saving check:', error)
+        alert(`Failed to save check: ${error.message || 'Unknown error'}`)
+        return
     }
     
     // Clear draft after successful print
@@ -901,24 +919,41 @@ async function printCheck () {
 }
 
 async function saveToHistory () {
-    // Mark as unprinted (only when saving without printing)
-    check.isPrinted = false
-    check.printedDate = null
-    
-    // Save to Supabase
-    const savedCheck = await state.saveCheck({...check}) // Clone to avoid reference issues
-    
-    // Update the local check with the saved ID
-    if (!check.id) {
-        check.id = savedCheck.id
+    // Validate that company and account are selected
+    if (!state.selectedCompanyId || !state.selectedAccountId) {
+        alert('Please select a company and bank account before saving.')
+        return
     }
     
-    // Clear draft after successful save
-    if (state.selectedAccountId) {
-        state.clearDraftCheck(state.selectedAccountId)
+    // Validate check data
+    if (!check.companyId || !check.accountId) {
+        alert('Check data is incomplete. Please refresh the page and select a company and account.')
+        return
     }
     
-    alert('Check saved successfully!')
+    try {
+        // Mark as unprinted (only when saving without printing)
+        check.isPrinted = false
+        check.printedDate = null
+        
+        // Save to Supabase
+        const savedCheck = await state.saveCheck({...check}) // Clone to avoid reference issues
+        
+        // Update the local check with the saved ID
+        if (!check.id) {
+            check.id = savedCheck.id
+        }
+        
+        // Clear draft after successful save
+        if (state.selectedAccountId) {
+            state.clearDraftCheck(state.selectedAccountId)
+        }
+        
+        alert('Check saved successfully!')
+    } catch (error) {
+        console.error('Error saving check:', error)
+        alert(`Failed to save check: ${error.message || 'Unknown error'}`)
+    }
 }
 
 // Ready-to-Print queue functions
@@ -1454,14 +1489,14 @@ async function genNewCheck () {
 
 const check = reactive({
     id: '',
-    companyId: '',
-    accountId: '',
+    companyId: state.selectedCompanyId || '',
+    accountId: state.selectedAccountId || '',
     accountHolderName: '',
     accountHolderAddress: '',
     accountHolderCity: '',
     accountHolderState: '',
     accountHolderZip: '',
-    checkNumber: '100',
+    checkNumber: '1000',
     date: new Date().toLocaleDateString(),
     bankName: '',
     amount: '0.00',
@@ -1537,9 +1572,17 @@ onMounted(async () => {
             Object.assign(check, newCheck)
         }
     } else {
-        // Fallback: Generate a new check
+        // Fallback: Generate a new check (will have empty IDs until account is selected)
         const newCheck = await genNewCheck()
         Object.assign(check, newCheck)
+    }
+    
+    // Ensure companyId and accountId are set if company/account are selected
+    if (state.selectedCompanyId && !check.companyId) {
+        check.companyId = state.selectedCompanyId
+    }
+    if (state.selectedAccountId && !check.accountId) {
+        check.accountId = state.selectedAccountId
     }
     
     // Scroll to top after nextTick (after initial render)
