@@ -1585,6 +1585,32 @@ onMounted(async () => {
         check.accountId = state.selectedAccountId
     }
     
+    // IMPORTANT: If account is already selected on mount, populate check fields
+    // (The watch won't fire if the value doesn't change)
+    if (state.selectedCompany && state.selectedAccount) {
+        console.log('🔄 Populating check fields on mount (account already selected)')
+        check.companyId = state.selectedCompanyId
+        check.accountId = state.selectedAccountId
+        check.accountHolderName = state.selectedCompany.name
+        check.accountHolderAddress = state.selectedCompany.address
+        check.accountHolderCity = state.selectedCompany.city
+        check.accountHolderState = state.selectedCompany.state
+        check.accountHolderZip = state.selectedCompany.zip
+        check.bankName = state.selectedAccount.bankName
+        check.routingNumber = state.selectedAccount.routingNumber
+        check.bankAccountNumber = state.selectedAccount.accountNumber
+        check.signature = state.selectedAccount.signature
+        
+        // Update check number for the account
+        check.checkNumber = await getNextCheckNumber(state.selectedAccountId)
+        
+        console.log('✅ Check populated on mount:', {
+            routingNumber: check.routingNumber,
+            accountNumber: check.bankAccountNumber,
+            checkNumber: check.checkNumber
+        })
+    }
+    
     // Scroll to top after nextTick (after initial render)
     await nextTick()
     scrollToTop()
