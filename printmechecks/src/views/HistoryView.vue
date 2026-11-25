@@ -207,6 +207,7 @@ tbody tr.table-info:hover {
 </style>
 
 <script setup lang="ts">
+import micrFontUrl from '../assets/micrenc.ttf'
 import { formatMoney } from '../utilities.ts'
 import { ref, onMounted, computed } from 'vue'
 import { useAppStore } from '../stores/app.ts'
@@ -582,7 +583,7 @@ const batchPrintSelected = () => {
           <div class="signature" style="position: absolute; top: 390px; left: 750px;">
             _________________________________________________
           </div>
-          <div class="banking" style="position: absolute; top: 420px; left: 80px; font-family: 'MICR', monospace; font-size: 37px;">
+          <div class="banking" style="position: absolute; top: 420px; left: 80px; font-family: 'banking', monospace; font-size: 37px;">
             a${check.routingNumber}a ${check.bankAccountNumber}c ${check.checkNumber}
           </div>
         </div>
@@ -591,12 +592,15 @@ const batchPrintSelected = () => {
   })
   
   // Write the HTML to the print window
+  const micrUrl = new URL(micrFontUrl, window.location.origin).href
   printWindow.document.write(`
     <!DOCTYPE html>
     <html>
     <head>
       <title>Print Checks</title>
+      <link href="https://fonts.googleapis.com/css2?family=Caveat&display=block" rel="stylesheet">
       <style>
+        @font-face { font-family: 'banking'; src: url('${micrUrl}') format('truetype'); font-display: block; }
         @page {
           margin: 0;
           size: letter;
@@ -620,12 +624,20 @@ const batchPrintSelected = () => {
     <body>
       ${checksHtml}
       <script>
-        window.onload = function() {
+        async function printWhenFontsReady() {
+          try {
+            await Promise.all([
+              document.fonts.load("37px 'banking'"),
+              document.fonts.load('30px Caveat'),
+            ]);
+            await document.fonts.ready;
+          } catch (e) { console.warn('Font preload failed', e); }
           window.print();
           window.onafterprint = function() {
             window.close();
           };
-        };
+        }
+        window.onload = printWhenFontsReady;
       <\/script>
     </body>
     </html>
