@@ -297,6 +297,7 @@
 </template>
 
 <script setup lang="ts">
+import micrFontUrl from '../assets/micrenc.ttf'
 import print from 'print-js';
 import { ToWords } from 'to-words';
 import { ref, reactive, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
@@ -970,6 +971,37 @@ async function loadCheckForEditing(unprintedCheck) {
     })
 }
 
+// Fonts the popup print window needs. A blank popup does not inherit the app's
+// @font-face (MICR 'banking') or the Google Caveat stylesheet from index.html,
+// so without this the MICR line falls back to monospace and memo/signature to
+// the OS 'cursive' font.
+function printWindowHead(extraCss = '') {
+    const micrUrl = new URL(micrFontUrl, window.location.origin).href
+    return `<head><meta charset="UTF-8">
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Caveat&display=block" rel="stylesheet">
+        <style>
+          @font-face { font-family: 'banking'; src: url('${micrUrl}') format('truetype'); font-display: block; }
+          @page { size: letter; margin: 0; }
+          ${extraCss}
+        </style></head>`
+}
+
+async function printWhenFontsReady(printWindow) {
+    const doc = printWindow.document
+    // force both faces to load before printing
+    try {
+        await Promise.all([
+            doc.fonts.load("37px 'banking'"),
+            doc.fonts.load('30px Caveat'),
+        ])
+        await doc.fonts.ready
+    } catch (e) { console.warn('Font preload failed', e) }
+    printWindow.focus()
+    printWindow.print()
+    printWindow.close()
+}
+
 async function printCheckDirectly(unprintedCheck) {
     // Print the check as-is without loading into editor
     const checkToUse = { ...unprintedCheck }
@@ -985,7 +1017,7 @@ async function printCheckDirectly(unprintedCheck) {
     try {
         // Generate the proper check HTML using the same template rendering as single print
         const checkHtml = await generatePrintableCheckHtml(checkToUse)
-        printWindow.document.write(checkHtml)
+        printWindow.document.write(`<!DOCTYPE html><html>${printWindowHead()}<body style="margin:0">${checkHtml}</body></html>`)
         printWindow.document.close()
         
         // Mark as printed AFTER the print window has opened successfully
@@ -995,10 +1027,7 @@ async function printCheckDirectly(unprintedCheck) {
         await state.updateCheck(checkToUse.id, checkToUse)
         
         // Set up print handler
-        printWindow.onload = () => {
-            printWindow.print()
-            printWindow.close()
-        }
+        printWhenFontsReady(printWindow)
         
         // Reload the unprinted queue
         await loadUnprintedChecks()
@@ -1038,7 +1067,7 @@ async function batchPrintUnprinted() {
     
     try {
         // Generate combined HTML for approved checks using the proper template rendering
-        let combinedHtml = '<html><head><style>@page { size: letter; margin: 0; } @media print { .page-break { page-break-after: always; } }</style></head><body>'
+        let combinedHtml = `<!DOCTYPE html><html>${printWindowHead('@media print { .page-break { page-break-after: always; } }')}<body style="margin:0">`
         
         for (let i = 0; i < approvedChecks.length; i++) {
             const checkData = approvedChecks[i]
@@ -1067,10 +1096,7 @@ async function batchPrintUnprinted() {
         }
         
         // Set up print handler
-        printWindow.onload = () => {
-            printWindow.print()
-            printWindow.close()
-        }
+        printWhenFontsReady(printWindow)
         
         // Reload the unprinted queue
         await loadUnprintedChecks()
