@@ -24,5 +24,8 @@
     "supabase"
   ],
   "author": "Brad Williams",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "playwright": "^1.65.1"
+  }
 }
